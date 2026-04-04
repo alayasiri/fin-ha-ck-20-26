@@ -16,10 +16,7 @@ def _score_color(score: float) -> str:
 
 def render(scores: dict):
     st.markdown("## Stress Test Simulator")
-    st.caption(
-        "Simulate market shocks and measure protocol resilience. "
-        "Impact is estimated from TVL composition, collateral exposure, and governance structure."
-    )
+    st.caption("Simulate market shocks and measure protocol resilience across TVL, collateral, and governance dimensions.")
 
     # ── Scenario selector ──────────────────────────────────────────────────────
     scenario_labels = {sid: s["label"] for sid, s in SCENARIOS.items()}
@@ -229,4 +226,4 @@ def render(scores: dict):
 
     table_html += "</table>"
     st.markdown(table_html, unsafe_allow_html=True)
-    st.caption("[contagion] = second-order contagion from correlated protocol exposure")
+    st.caption("[contagion] = second-order impact via correlated protocol exposure")

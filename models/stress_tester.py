@@ -38,56 +38,42 @@ _BTC_EXPOSED = {
 SCENARIOS = {
     "flash_crash": {
         "label":        "Protocol Flash Crash",
-        "description":  (
-            "Any protocol drops N% TVL within 24–48 hours. Causes include governance attacks, "
-            "whale exits, oracle failures, or exploit rumours. Unlike a slow drawdown, speed "
-            "prevents governance from responding — contagion hits correlated protocols before "
-            "anyone can react. Select the target protocol and set the TVL drop magnitude."
-        ),
+        "description":  "A protocol loses the specified TVL share within 24 hours. Models contagion to correlated protocols before governance can respond.",
         "param_label":  "TVL drop (%)",
         "param_range":  (10, 95),
         "param_default": 40,
     },
     "btc_crash": {
         "label":        "BTC Market Crash",
-        "description":  (
-            "Simulates a sharp BTC price drop — the most common macro shock in crypto. "
-            "BTC and ETH are highly correlated (~0.85), so a BTC crash propagates to ETH "
-            "collateral and triggers market-wide fear, TVL outflows, and liquidation cascades "
-            "in lending protocols. This is the scenario closest to a real overnight crash."
-        ),
+        "description":  "Sharp BTC decline propagates to ETH collateral via high correlation, driving TVL outflows and liquidation cascades in lending protocols.",
         "param_label":  "BTC price drop (%)",
         "param_range":  (10, 70),
         "param_default": 30,
     },
     "eth_crash": {
         "label":       "ETH Price Crash",
-        "description": "Simulates a sharp ETH price drawdown triggering liquidation cascades "
-                       "across ETH-collateralised lending and staking protocols.",
+        "description": "ETH price decline triggers liquidation cascades across lending and staking protocols with ETH collateral exposure.",
         "param_label": "ETH price drop (%)",
         "param_range": (10, 70),
         "param_default": 40,
     },
     "tvl_exodus": {
         "label":       "DeFi Liquidity Exodus",
-        "description": "Models coordinated withdrawal pressure — e.g. from a macro risk-off event "
-                       "or a loss of confidence in DeFi broadly.",
+        "description": "Coordinated TVL withdrawals across DeFi, driven by macro risk-off sentiment or broad loss of confidence.",
         "param_label": "TVL outflow (%)",
         "param_range": (5, 60),
         "param_default": 30,
     },
     "stablecoin_depeg": {
         "label":       "Stablecoin Depeg",
-        "description": "A major stablecoin (e.g. USDC/USDT) trades at a discount, causing "
-                       "pool imbalances and collateral devaluations in exposed protocols.",
+        "description": "A major stablecoin trades below peg, causing pool imbalances and collateral devaluation in exposed protocols.",
         "param_label": "Depeg magnitude (%)",
         "param_range": (1, 25),
         "param_default": 8,
     },
     "exploit": {
         "label":       "Smart Contract Exploit",
-        "description": "Simulates a targeted exploit that drains a proportion of a protocol's "
-                       "TVL, with second-order contagion to closely-correlated protocols.",
+        "description": "Targeted exploit drains a protocol's TVL, with second-order impact on closely correlated protocols.",
         "param_label": "TVL drained (%)",
         "param_range": (10, 90),
         "param_default": 60,
