@@ -48,6 +48,7 @@ import ui.protocol_detail as pg_detail
 import ui.anomalies as pg_anomalies
 import ui.stress_test as pg_stress
 import ui.portfolio as pg_portfolio
+import ui.chat as pg_chat
 
 
 # ── Session state ──────────────────────────────────────────────────────────────
@@ -99,6 +100,7 @@ _PAGE_META = {
     "Anomaly Feed":        "On-chain activity flagged as statistically unusual",
     "Stress Test":         "Simulate market shocks and measure resilience",
     "Portfolio Advisor":   "Position signals and allocation recommendations",
+    "AI Risk Assistant":   "Chat interactively about the current risk landscape",
 }
 
 with st.sidebar:
@@ -206,3 +208,6 @@ elif page == "Stress Test":
 
 elif page == "Portfolio Advisor":
     pg_portfolio.render(scores, anomalies)
+
+elif page == "AI Risk Assistant":
+    pg_chat.render(scores, anomalies, data)
