@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from threading import Lock
 
-from config import PROTOCOLS, SLUG_OVERRIDES
+from config import LENDING_POOL_SLUGS, PROTOCOLS, SLUG_OVERRIDES, SNAPSHOT_SPACES
 from data.cache import get_cache
 
 _SSL = ssl.create_default_context()
@@ -183,6 +183,79 @@ def fetch_all_price_histories() -> dict[str, list[float]]:
     return out
 
 
+# ── Utilization rate (lending protocols) ─────────────────────────────────────
+
+def fetch_utilization_rates() -> dict[str, float]:
+    """Returns borrow utilization (0–1) for lending protocols via DeFiLlama /pools."""
+    cache_key = "utilization"
+    cache = get_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    out = {}
+    try:
+        pools = _get(f"{LLAMA_BASE.replace('api.llama.fi','yields.llama.fi')}/pools")
+        if not isinstance(pools, dict):
+            return {}
+        for pool in pools.get("data", []):
+            project = pool.get("project", "")
+            for name, slug in LENDING_POOL_SLUGS.items():
+                if project == slug and pool.get("utilization") is not None:
+                    # Average across pools of the same protocol
+                    prev = out.get(name)
+                    u = float(pool["utilization"])
+                    out[name] = (prev + u) / 2 if prev is not None else u
+    except Exception:
+        pass
+
+    cache.set(cache_key, out, ttl=86_400)
+    return out
+
+
+# ── Governance activity (Snapshot) ────────────────────────────────────────────
+
+_SNAPSHOT_GQL = "https://hub.snapshot.org/graphql"
+
+
+def fetch_governance_activity() -> dict[str, int]:
+    """Returns number of governance proposals in the last 30 days per protocol."""
+    cache_key = "governance_activity"
+    cache = get_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    import time as _time
+    cutoff = int(_time.time()) - 30 * 86_400
+    out    = {}
+
+    for name, space in SNAPSHOT_SPACES.items():
+        query = (
+            '{"query":"{ proposals(first:50, where:{space:\\\"'
+            + space
+            + '\\\",created_gte:'
+            + str(cutoff)
+            + '}) { id } }"}'
+        )
+        req = urllib.request.Request(
+            _SNAPSHOT_GQL,
+            data=query.encode(),
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10, context=_SSL) as r:
+                data = json.loads(r.read())
+            proposals = data.get("data", {}).get("proposals", [])
+            out[name] = len(proposals)
+        except Exception:
+            out[name] = 0
+        time.sleep(0.5)
+
+    cache.set(cache_key, out, ttl=86_400)
+    return out
+
+
 # ── Fear & Greed ──────────────────────────────────────────────────────────────
 
 def fetch_fear_greed() -> dict:
@@ -324,10 +397,19 @@ def load_all_data(status_cb=None) -> dict:
         status_cb(0.55, "Fear & Greed index…")
     fng = fetch_fear_greed()
 
-    # Stage 3 — News sentiment (60% → 100%)
+    # Stage 3 — Utilization + governance (60% → 70%)
+    if status_cb:
+        status_cb(0.60, "Lending utilization rates…")
+    utilization = fetch_utilization_rates()
+
+    if status_cb:
+        status_cb(0.65, "Governance activity (Snapshot)…")
+    governance  = fetch_governance_activity()
+
+    # Stage 4 — News sentiment (70% → 100%)
     def _sent_cb(frac, label):
         if status_cb:
-            status_cb(0.60 + frac * 0.40, label)
+            status_cb(0.70 + frac * 0.30, label)
 
     sentiments = fetch_all_sentiments(status_cb=_sent_cb)
 
@@ -335,10 +417,12 @@ def load_all_data(status_cb=None) -> dict:
         status_cb(1.0, "Done")
 
     return {
-        "tvl":        tvl_data,
-        "prices":     prices,
-        "px_hist":    {},   # populated lazily per-protocol in Deep Dive
-        "fear_greed": fng,
-        "sentiment":  sentiments,
-        "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
+        "tvl":         tvl_data,
+        "prices":      prices,
+        "px_hist":     {},   # populated lazily per-protocol in Deep Dive
+        "fear_greed":  fng,
+        "sentiment":   sentiments,
+        "utilization": utilization,
+        "governance":  governance,
+        "fetched_at":  datetime.utcnow().isoformat(timespec="seconds"),
     }

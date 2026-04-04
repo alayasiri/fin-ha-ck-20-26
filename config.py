@@ -332,6 +332,58 @@ ETH_COLLATERAL_HEAVY = {
     "Instadapp", "Synthetix",
 }
 
+# Known on-chain incidents — used as reference markers on TVL charts.
+# Each entry: {"date": "YYYY-MM-DD", "label": str, "severity": "major"|"minor"}
+HISTORICAL_INCIDENTS: dict[str, list[dict]] = {
+    "Curve Finance": [
+        {"date": "2023-07-30", "label": "Vyper reentrancy exploit (~$70M)", "severity": "major"},
+    ],
+    "Yearn Finance": [
+        {"date": "2023-02-04", "label": "Flash loan attack ($11.6M)", "severity": "major"},
+    ],
+    "Compound": [
+        {"date": "2021-10-01", "label": "Oracle price manipulation", "severity": "minor"},
+        {"date": "2021-09-29", "label": "COMP over-distribution bug", "severity": "minor"},
+    ],
+    "Solend": [
+        {"date": "2022-06-19", "label": "Emergency governance vote on whale position", "severity": "minor"},
+    ],
+    "Beefy Finance": [
+        {"date": "2022-03-04", "label": "Grim Finance fork exploit (indirect)", "severity": "minor"},
+    ],
+    "Synthetix": [
+        {"date": "2019-06-25", "label": "Oracle misconfiguration, 37B sETH minted", "severity": "major"},
+    ],
+    "Sky (MakerDAO)": [
+        {"date": "2020-03-12", "label": "Black Thursday — ETH crash, zero-bid auctions", "severity": "major"},
+    ],
+    "Lido": [
+        {"date": "2023-05-25", "label": "Ethereum Shanghai upgrade (mass unstaking)", "severity": "minor"},
+    ],
+}
+
+# Snapshot governance spaces (for proposal activity signal)
+SNAPSHOT_SPACES = {
+    "Aave":           "aave.eth",
+    "Compound":       "comp-vote.eth",
+    "Uniswap":        "uniswap",
+    "Curve Finance":  "curve.eth",
+    "Sky (MakerDAO)": "makerdao.eth",
+    "Yearn Finance":  "ybaby.eth",
+    "GMX":            "gmx.eth",
+    "Synthetix":      "snxgov.eth",
+    "1Inch":          "1inch.eth",
+    "Lido":           "lido-snapshot.eth",
+}
+
+# DeFiLlama pool IDs for utilization rate (lending protocols only)
+LENDING_POOL_SLUGS = {
+    "Aave":     "aave-v3",
+    "Compound": "compound-v3",
+    "Solend":   "solend",
+    "JustLend": "justlend",
+}
+
 CATEGORY_COLORS = {
     "Lending":          "#58a6ff",
     "DEX":              "#3fb950",

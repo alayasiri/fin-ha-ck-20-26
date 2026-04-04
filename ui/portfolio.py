@@ -26,12 +26,98 @@ def _max_allocation(score: float) -> float:
     return 0.0
 
 
+def _portfolio_risk_calculator(scores: dict):
+    st.markdown("### Your Portfolio Risk Score")
+    st.caption(
+        "Enter your current holdings to calculate a weighted portfolio risk score "
+        "and see which protocols are driving your overall exposure."
+    )
+
+    protocol_names = list(scores.keys())
+    holdings: dict[str, float] = {}
+
+    with st.expander("Enter holdings (USD)", expanded=True):
+        cols = st.columns(4)
+        for i, name in enumerate(protocol_names):
+            val = cols[i % 4].number_input(
+                name, min_value=0.0, value=0.0, step=100.0,
+                format="%.0f", key=f"holding_{name}", label_visibility="visible"
+            )
+            if val > 0:
+                holdings[name] = val
+
+    if not holdings:
+        st.info("Enter at least one holding above to see your portfolio risk score.")
+        return
+
+    total = sum(holdings.values())
+    weights = {n: v / total for n, v in holdings.items()}
+    port_score = sum(weights[n] * scores[n]["composite"] for n in holdings)
+    band = "LOW" if port_score < THRESHOLDS["low"] else \
+           ("MEDIUM" if port_score < THRESHOLDS["medium"] else "HIGH")
+    band_color = {"LOW": "#3fb950", "MEDIUM": "#e3b341", "HIGH": "#f85149"}[band]
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Portfolio Risk Score", f"{port_score:.1f} / 100")
+    m2.metric("Risk Band", band)
+    m3.metric("Total DeFi Exposure", f"${total:,.0f}")
+
+    # Risk contribution breakdown
+    contributions = {
+        n: weights[n] * scores[n]["composite"]
+        for n in holdings
+    }
+    contrib_sorted = sorted(contributions.items(), key=lambda x: -x[1])
+
+    fig = go.Figure(go.Bar(
+        x=[c for _, c in contrib_sorted],
+        y=[n for n, _ in contrib_sorted],
+        orientation="h",
+        marker_color=[
+            "#f85149" if scores[n]["composite"] >= THRESHOLDS["medium"] else
+            "#e3b341" if scores[n]["composite"] >= THRESHOLDS["low"] else "#3fb950"
+            for n, _ in contrib_sorted
+        ],
+        text=[f"{c:.1f} pts  ({weights[n]*100:.1f}% allocation)"
+              for n, c in contrib_sorted],
+        textposition="outside",
+        textfont=dict(color="#8b949e", size=11),
+        hovertemplate="%{y}<br>Risk contribution: %{x:.2f} pts<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text="Risk contribution by protocol (weight × score)",
+                   font=dict(color="#8b949e", size=12)),
+        height=max(220, len(holdings) * 32),
+        margin=dict(t=30, b=10, l=10, r=140),
+        paper_bgcolor="#0d1117", plot_bgcolor="#161b22",
+        xaxis=dict(gridcolor="#21262d", color="#8b949e"),
+        yaxis=dict(autorange="reversed", tickfont=dict(color="#e6edf3")),
+        showlegend=False,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Flag over-limit allocations
+    over_limit = [
+        n for n in holdings
+        if weights[n] * 100 > _max_allocation(scores[n]["composite"])
+    ]
+    if over_limit:
+        st.warning(
+            f"**Allocation exceeds suggested cap** for: {', '.join(over_limit)}. "
+            "Consider rebalancing to stay within risk-adjusted position limits."
+        )
+
+    st.divider()
+
+
 def render(scores: dict, anomalies: dict):
     st.markdown("## Portfolio Risk Advisor")
     st.caption(
         "Signal-based position guidance derived from the composite risk score, "
         "on-chain anomaly count, and sentiment overlay."
     )
+
+    _portfolio_risk_calculator(scores)
 
     # ── Signal distribution summary ────────────────────────────────────────────
     by_signal: dict[str, list[str]] = {"INCREASE": [], "HOLD": [], "REDUCE": [], "EXIT": []}

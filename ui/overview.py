@@ -21,8 +21,60 @@ def _band_label(score: float) -> str:
     return "HIGH"
 
 
+def _alert_banner(scores: dict, anomalies: dict):
+    exits   = [n for n, v in scores.items() if v["signal"] == "EXIT"]
+    reduces = [n for n, v in scores.items() if v["signal"] == "REDUCE"]
+    high_anom = [n for n, evs in anomalies.items()
+                 if any(e["severity"] == "high" for e in evs)]
+
+    if exits:
+        st.error(
+            f"**EXIT signal active** — {', '.join(exits)}. "
+            "Risk scores have crossed the high-risk threshold. Review positions immediately."
+        )
+    if reduces:
+        st.warning(
+            f"**REDUCE signal** — {', '.join(reduces)}. "
+            "Elevated risk detected; consider trimming exposure."
+        )
+    if high_anom:
+        names = ", ".join(high_anom)
+        st.warning(f"**High-severity anomalies** detected on: {names}.")
+
+
 def render(scores: dict, anomalies: dict, fear_greed: dict):
+    _alert_banner(scores, anomalies)
     st.markdown("## Protocol Risk Overview")
+    st.caption(
+        "Composite risk score (0–100) across 20 major DeFi protocols, "
+        "updated every 24 hours from on-chain data."
+    )
+
+    # ── Risk band legend ───────────────────────────────────────────────────────
+    st.markdown(
+        "<div style='display:flex;gap:10px;margin-bottom:8px'>"
+        "<span style='background:#1a3a2a;color:#3fb950;padding:3px 12px;"
+        "border-radius:12px;font-size:12px;font-weight:600'>● LOW &nbsp;0–35</span>"
+        "<span style='background:#3a2a00;color:#e3b341;padding:3px 12px;"
+        "border-radius:12px;font-size:12px;font-weight:600'>● MEDIUM &nbsp;35–60</span>"
+        "<span style='background:#3a1a1a;color:#f85149;padding:3px 12px;"
+        "border-radius:12px;font-size:12px;font-weight:600'>● HIGH &nbsp;60–100</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("How are scores calculated?", expanded=False):
+        st.markdown("""
+| Component | Weight | What it measures |
+|-----------|--------|-----------------|
+| Liquidity Risk | 25% | TVL drawdown from peak, 7-day and 30-day trend |
+| Smart Contract Risk | 25% | Audit age, exploit history, bug bounty size |
+| Governance Risk | 20% | Token concentration, timelock presence, chain governance |
+| Market Risk | 20% | Token price volatility and 30-day return |
+| Sentiment Risk | 10% | Crypto Fear & Greed index + protocol news tone |
+
+**Signal thresholds:** INCREASE < 30 · HOLD 30–45 · REDUCE 45–65 · EXIT > 65
+        """)
 
     # ── Top metrics row ────────────────────────────────────────────────────────
     total_tvl  = sum(v.get("current_tvl", 0) for v in scores.values())
@@ -33,18 +85,23 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total TVL Tracked", f"${total_tvl / 1e9:.2f}B")
+        st.metric("Total TVL Tracked", f"${total_tvl / 1e9:.2f}B",
+                  help="Sum of current TVL across all 20 tracked protocols")
     with col2:
-        st.metric("High-Risk Protocols", f"{high_risk} / {len(scores)}", delta=None)
+        st.metric("High-Risk Protocols", f"{high_risk} / {len(scores)}",
+                  help="Protocols with composite risk score ≥ 60")
     with col3:
-        st.metric("Active Anomalies", str(anom_total))
+        st.metric("Active Anomalies", str(anom_total),
+                  help="Statistically unusual TVL events detected in the last 90 days")
     with col4:
-        st.metric(f"Fear & Greed — {fng_label}", str(fng_val))
+        st.metric(f"Fear & Greed — {fng_label}", str(fng_val),
+                  help="Alternative.me Crypto Fear & Greed Index (0=Extreme Fear, 100=Extreme Greed)")
 
     st.divider()
 
     # ── Risk treemap ───────────────────────────────────────────────────────────
     st.markdown("### Risk Landscape")
+    st.caption("Box size = TVL · Color = risk score · Hover for details")
 
     labels, parents, values, colors, customdata = [], [], [], [], []
     for name, data in scores.items():
@@ -115,10 +172,27 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
 
     # ── Risk score table ───────────────────────────────────────────────────────
     st.markdown("### Protocol Risk Scores")
+    st.caption("Select a protocol in the sidebar → **Protocol Deep Dive** to see full history and factor breakdown.")
 
-    sort_key = st.selectbox(
+    # Quick-access buttons for high-risk protocols
+    high_risk_protocols = [n for n, v in scores.items() if v["composite"] >= THRESHOLDS["medium"]]
+    if high_risk_protocols:
+        st.markdown(
+            "<span style='font-size:12px;color:#f85149;font-weight:600'>High-risk — explore in Deep Dive:</span>",
+            unsafe_allow_html=True,
+        )
+        btn_cols = st.columns(min(len(high_risk_protocols), 5))
+        for col, name in zip(btn_cols, high_risk_protocols[:5]):
+            if col.button(name, key=f"hr_{name}", help=f"Open {name} in Deep Dive"):
+                st.session_state.active_protocol = name
+                st.session_state.active_page = "Protocol Deep Dive"
+                st.rerun()
+
+    col_sort, _ = st.columns([2, 5])
+    sort_key = col_sort.selectbox(
         "Sort by", ["Risk Score", "TVL", "7d TVL Change", "Signal"],
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        help="Change the column used to sort the table",
     )
 
     rows = []

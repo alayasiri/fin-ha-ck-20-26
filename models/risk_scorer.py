@@ -21,7 +21,7 @@ from config import PROTOCOLS, THRESHOLDS, WEIGHTS
 
 # ── Component scorers ──────────────────────────────────────────────────────────
 
-def _liquidity_score(tvl_series: list[dict]) -> tuple[float, dict]:
+def _liquidity_score(tvl_series: list[dict], utilization: float | None = None) -> tuple[float, dict]:
     if not tvl_series:
         return 50.0, {"drawdown_pct": 0, "change_7d": 0, "change_30d": 0, "current_tvl": 0}
 
@@ -44,14 +44,20 @@ def _liquidity_score(tvl_series: list[dict]) -> tuple[float, dict]:
     s_drawdown = min(drawdown * 55, 40)
     s_7d       = min(max(-ch7  * 150, 0), 30)
     s_30d      = min(max(-ch30 *  90, 0), 30)
-    score      = s_drawdown + s_7d + s_30d
+
+    # Utilization penalty for lending protocols: >80% util is a risk signal
+    s_util = 0.0
+    if utilization is not None and utilization > 0.80:
+        s_util = min((utilization - 0.80) * 100, 20)   # up to 20 pts over 80%
+    score  = s_drawdown + s_7d + s_30d + s_util
 
     meta = {
         "drawdown_pct": round(drawdown * 100, 2),
         "change_7d":    round(ch7  * 100, 2),
         "change_30d":   round(ch30 * 100, 2),
-        "current_tvl":  current,
-        "peak_tvl":     peak,
+        "current_tvl":   current,
+        "peak_tvl":      peak,
+        "utilization":   round(utilization * 100, 1) if utilization is not None else None,
     }
     return round(min(score, 100), 2), meta
 
@@ -102,7 +108,7 @@ def _sc_score(meta: dict) -> float:
     return round(min(s_audit + s_exploit + s_bounty, 100), 2)
 
 
-def _governance_score(meta: dict) -> float:
+def _governance_score(meta: dict, proposal_count: int = 0) -> float:
     gini  = meta["token_gini"]
     chain = meta["chain"]
 
@@ -119,7 +125,10 @@ def _governance_score(meta: dict) -> float:
     else:
         s_chain = 0
 
-    return round(min(s_concentration + s_timelock + s_chain, 100), 2)
+    # Governance spike: many proposals in 30 days can signal instability
+    s_spike = min(max(proposal_count - 5, 0) * 2, 15)
+
+    return round(min(s_concentration + s_timelock + s_chain + s_spike, 100), 2)
 
 
 def _sentiment_score(fng_value: int, news_polarity: float) -> float:
@@ -136,7 +145,11 @@ def _sentiment_score(fng_value: int, news_polarity: float) -> float:
 # ── Signal logic ───────────────────────────────────────────────────────────────
 
 def _signal(composite: float, anomaly_count: int = 0) -> str:
-    score = composite + anomaly_count * 3   # anomalies nudge score up
+    # anomaly_count is recent (90-day) high/medium events only.
+    # Cap contribution at 3 events × 3 pts = 9 pts max so a healthy
+    # protocol with noisy TVL isn't pushed straight to EXIT.
+    nudge = min(anomaly_count, 3) * 3
+    score = composite + nudge
     if score < 30:
         return "INCREASE"
     elif score < 45:
@@ -168,18 +181,20 @@ def _rationale(name: str, breakdown: dict, anomaly_count: int) -> str:
 
 def score_protocol(
     name: str,
-    tvl_series:    list[dict],
-    price_history: list[float],
-    fng_value:     int,
-    news_sentiment:float,
-    anomaly_count: int = 0,
+    tvl_series:     list[dict],
+    price_history:  list[float],
+    fng_value:      int,
+    news_sentiment: float,
+    anomaly_count:  int = 0,
+    utilization:    float | None = None,
+    proposal_count: int = 0,
 ) -> dict:
     meta = PROTOCOLS[name]
 
-    liq_score,  liq_meta  = _liquidity_score(tvl_series)
+    liq_score,  liq_meta  = _liquidity_score(tvl_series, utilization)
     mkt_score,  mkt_meta  = _market_score(price_history)
     sc_score              = _sc_score(meta)
-    gov_score             = _governance_score(meta)
+    gov_score             = _governance_score(meta, proposal_count)
     sent_score            = _sentiment_score(fng_value, news_sentiment)
 
     w = WEIGHTS
@@ -215,22 +230,28 @@ def score_protocol(
         "drawdown_pct":    liq_meta.get("drawdown_pct", 0),
         "change_7d":       liq_meta.get("change_7d", 0),
         "change_30d":      liq_meta.get("change_30d", 0),
+        "utilization":     liq_meta.get("utilization"),
+        "proposal_count":  proposal_count,
         "volatility_30d":  mkt_meta.get("volatility_30d", 0),
         "price_return_30d":mkt_meta.get("price_return_30d", 0),
     }
 
 
 def score_all(data: dict, anomaly_counts: dict | None = None) -> dict[str, dict]:
-    fng_value = data["fear_greed"].get("value", 50)
+    fng_value      = data["fear_greed"].get("value", 50)
     anomaly_counts = anomaly_counts or {}
+    utilization    = data.get("utilization", {})
+    governance     = data.get("governance", {})
     results = {}
     for name in PROTOCOLS:
         results[name] = score_protocol(
-            name          = name,
-            tvl_series    = data["tvl"].get(name, []),
-            price_history = data["px_hist"].get(name, []),
-            fng_value     = fng_value,
-            news_sentiment= data["sentiment"].get(name, 0.0),
-            anomaly_count = anomaly_counts.get(name, 0),
+            name           = name,
+            tvl_series     = data["tvl"].get(name, []),
+            price_history  = data["px_hist"].get(name, []),
+            fng_value      = fng_value,
+            news_sentiment = data["sentiment"].get(name, 0.0),
+            anomaly_count  = anomaly_counts.get(name, 0),
+            utilization    = utilization.get(name),
+            proposal_count = governance.get(name, 0),
         )
     return results

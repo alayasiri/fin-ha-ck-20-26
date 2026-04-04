@@ -16,8 +16,8 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 
 
-_ZSCORE_THRESHOLD = 2.5
-_IF_CONTAMINATION = 0.05   # ~5% expected anomaly rate
+_ZSCORE_THRESHOLD = 3.5    # only flag genuine outliers (~0.05% of normal data)
+_IF_CONTAMINATION = 0.01   # 1% contamination → ~3-4 events per year of daily data
 
 
 def _make_series(tvl_entries: list[dict]) -> list[float]:
@@ -98,24 +98,32 @@ def _isolation_forest_anomalies(values: list[float], dates: list[int]) -> list[d
     return events
 
 
+_LOOKBACK_DAYS = 365   # only analyse the most recent year of TVL data
+
+
 def detect_anomalies(tvl_series: list[dict]) -> list[dict]:
     if not tvl_series:
         return []
 
-    # Sort chronologically — DeFiLlama usually returns ascending but not always
     tvl_series = sorted(tvl_series, key=lambda e: e.get("date", 0))
+
+    # Restrict to the last _LOOKBACK_DAYS so the detector doesn't surface
+    # ancient events and the displayed count reflects recent protocol health.
+    cutoff_ts = tvl_series[-1].get("date", 0) - _LOOKBACK_DAYS * 86_400
+    tvl_series = [e for e in tvl_series if e.get("date", 0) >= cutoff_ts]
+
+    if not tvl_series:
+        return []
+
     values = _make_series(tvl_series)
     dates  = [e.get("date", 0) for e in tvl_series]
 
     z_events  = _zscore_anomalies(values, dates)
     if_events = _isolation_forest_anomalies(values, dates)
 
-    # Deduplicate by date — prefer z-score events (more interpretable)
     seen  = {e["date"] for e in z_events}
     extra = [e for e in if_events if e["date"] not in seen]
-    all_events = sorted(z_events + extra, key=lambda e: e["date"], reverse=True)
-
-    return all_events[:20]   # cap to 20 most recent
+    return sorted(z_events + extra, key=lambda e: e["date"], reverse=True)
 
 
 def detect_all_anomalies(tvl_data: dict[str, list[dict]]) -> dict[str, list[dict]]:
