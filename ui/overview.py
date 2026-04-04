@@ -1,5 +1,6 @@
 import plotly.graph_objects as go
 import streamlit as st
+from textwrap import dedent
 
 from config import CATEGORY_COLORS, THRESHOLDS
 
@@ -144,7 +145,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
     rows.sort(key=lambda r: r[sort_col], reverse=reverse)
 
     # Custom HTML table for visual richness
-    table_html = """
+    table_html = dedent("""
     <style>
     .risk-table { width:100%; border-collapse:collapse; font-size:13px; }
     .risk-table th { background:#161b22; color:#8b949e; padding:8px 12px;
@@ -170,7 +171,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
       <th>TVL</th><th>7d Δ TVL</th><th>Drawdown</th>
       <th>Signal</th><th>Anomalies</th>
     </tr>
-    """
+        """)
 
     sig_class = {"INCREASE":"sig-increase","HOLD":"sig-hold","REDUCE":"sig-reduce","EXIT":"sig-exit"}
     band_class = {"LOW":"badge-low","MEDIUM":"badge-medium","HIGH":"badge-high"}
@@ -186,7 +187,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
         band      = r["Band"]
         sig       = r["Signal"]
 
-        table_html += f"""
+        table_html += dedent(f"""
         <tr>
           <td style="color:#8b949e">{i}</td>
           <td><b>{r['Protocol']}</b></td>
@@ -203,7 +204,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
           <td style="color:#8b949e">{dd_str}</td>
           <td class="{sig_class.get(sig,'')}">{sig}</td>
           <td style="color:{'#f85149' if r['Anomalies'] else '#8b949e'}">{r['Anomalies'] or '—'}</td>
-        </tr>"""
+                </tr>""")
 
     table_html += "</table>"
     st.markdown(table_html, unsafe_allow_html=True)
