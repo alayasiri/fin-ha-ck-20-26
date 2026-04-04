@@ -16,8 +16,8 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 
 
-_ZSCORE_THRESHOLD = 3.5    # only flag genuine outliers (~0.05% of normal data)
-_IF_CONTAMINATION = 0.01   # 1% contamination → ~3-4 events per year of daily data
+_ZSCORE_THRESHOLD = 4.5    # only flag genuine outliers (~0.05% of normal data)
+_IF_CONTAMINATION = 0.002   # 0.2% contamination → ~0-1 events per year of daily data
 
 
 def _make_series(tvl_entries: list[dict]) -> list[float]:
