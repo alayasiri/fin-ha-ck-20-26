@@ -16,7 +16,7 @@ st.set_page_config(
 st.markdown("""
 <style>
   /* Tighten default Streamlit padding */
-  .block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
+  .block-container { padding-top: 3.5rem; padding-bottom: 1rem; }
   /* Metric card styling */
   [data-testid="metric-container"] {
     background: #161b22;
