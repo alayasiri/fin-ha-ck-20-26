@@ -3,7 +3,15 @@ DeFi Risk Intelligence Platform
 ================================
 Entry point — run with:  streamlit run app.py
 """
+import os
 import streamlit as st
+
+# Inject Streamlit secrets into os.environ so all modules can use os.environ.get()
+try:
+    for _k, _v in st.secrets.items():
+        os.environ.setdefault(str(_k), str(_v))
+except Exception:
+    pass
 
 st.set_page_config(
     page_title="DeFi Risk Intelligence",
