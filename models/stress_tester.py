@@ -215,6 +215,7 @@ def run_scenario(
     param:          float,
     current_scores: dict,
     target_protocol:str | None = None,
+    user_holdings:  dict | None = None,
 ) -> dict:
     scenario = SCENARIOS[scenario_id]
     results  = []
@@ -258,18 +259,28 @@ def run_scenario(
 
     results.sort(key=lambda r: r["score_delta"], reverse=True)
 
-    total_tvl      = sum(r["current_tvl"] for r in results if r["current_tvl"])
-    weighted_impact = (
+    total_tvl = sum(r["current_tvl"] for r in results if r["current_tvl"])
+    market_impact = (
         sum(r["tvl_impact_pct"] * r["current_tvl"] for r in results if r["current_tvl"]) / total_tvl
         if total_tvl else 0
     )
+
+    portfolio_impact = 0.0
+    if user_holdings:
+        port_total = sum(user_holdings.values())
+        if port_total > 0:
+            impact_sum = sum(user_holdings.get(r["protocol"], 0) * (r["tvl_impact_pct"]/100.0) for r in results)
+            portfolio_impact = (impact_sum / port_total) * 100.0
+    else:
+        portfolio_impact = market_impact
 
     return {
         "scenario_id":       scenario_id,
         "scenario_label":    scenario["label"],
         "param":             param,
         "results":           results,
-        "portfolio_tvl_impact": round(weighted_impact, 2),
+        "portfolio_tvl_impact": round(portfolio_impact, 2),
+        "market_tvl_impact": round(market_impact, 2),
         "protocols_breaching_threshold": sum(1 for r in results if r["crosses_threshold"]),
         "max_single_impact": max((r["tvl_impact_pct"] for r in results), default=0),
     }

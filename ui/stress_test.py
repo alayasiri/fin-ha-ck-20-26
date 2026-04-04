@@ -59,15 +59,28 @@ def render(scores: dict):
             )
 
     # ── Run simulation ─────────────────────────────────────────────────────────
-    result = run_scenario(scenario_id, float(param), scores, target_protocol)
+    user_holdings = st.session_state.get("portfolio_holdings", {})
+    result = run_scenario(scenario_id, float(param), scores, target_protocol, user_holdings)
     rows   = result["results"]
 
     # ── KPI strip ─────────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
+    
+    if user_holdings:
+        impact_label = "Your Portfolio Impact"
+        port_total = sum(user_holdings.values())
+        dollar_impact = port_total * (result['portfolio_tvl_impact'] / 100.0)
+        val_str = f"{result['portfolio_tvl_impact']:+.1f}%"
+        delta_str = f"${dollar_impact:,.0f} estimated loss"
+    else:
+        impact_label = "DeFi Market TVL Impact"
+        val_str = f"{result['portfolio_tvl_impact']:+.1f}%"
+        delta_str = f"{result['portfolio_tvl_impact']:.1f}%"
+
     col1.metric(
-        "Portfolio TVL Impact",
-        f"{result['portfolio_tvl_impact']:+.1f}%",
-        delta=f"{result['portfolio_tvl_impact']:.1f}%",
+        impact_label,
+        val_str,
+        delta=delta_str,
         delta_color="inverse",
     )
     col2.metric(
@@ -164,21 +177,24 @@ def render(scores: dict):
     # ── Detailed results table ─────────────────────────────────────────────────
     st.markdown("### Full Results")
 
+    has_holdings = bool(user_holdings)
+    holding_headers = "<th>Holding (USD)</th><th>Est. Loss</th>" if has_holdings else ""
+
     table_html = """
-    <style>
-    .st-table { width:100%;border-collapse:collapse;font-size:13px; }
-    .st-table th { background:#161b22;color:#8b949e;padding:8px 12px;
-                   border-bottom:1px solid #30363d;text-align:left; }
-    .st-table td { padding:7px 12px;border-bottom:1px solid #21262d;color:#e6edf3; }
-    .st-table tr:hover td { background:#1c2128; }
-    .breach-row td { border-left:3px solid #f85149; }
-    </style>
-    <table class="st-table">
-    <tr>
-      <th>Protocol</th><th>Category</th>
-      <th>Before</th><th>After</th><th>Δ Score</th>
-      <th>TVL Impact</th><th>Threshold Breach</th>
-    </tr>"""
+<style>
+.st-table { width:100%;border-collapse:collapse;font-size:13px; }
+.st-table th { background:#161b22;color:#8b949e;padding:8px 12px;
+               border-bottom:1px solid #30363d;text-align:left; }
+.st-table td { padding:7px 12px;border-bottom:1px solid #21262d;color:#e6edf3; }
+.st-table tr:hover td { background:#1c2128; }
+.breach-row td { border-left:3px solid #f85149; }
+</style>
+<table class="st-table">
+<tr>
+  <th>Protocol</th><th>Category</th>
+  <th>Before</th><th>After</th><th>Δ Score</th>
+  <th>TVL Impact</th>""" + holding_headers + """<th>Threshold Breach</th>
+</tr>"""
 
     for r in sorted(rows, key=lambda x: x["score_delta"], reverse=True):
         breach_class = "breach-row" if r["crosses_threshold"] else ""
@@ -188,16 +204,28 @@ def render(scores: dict):
                        "#e3b341" if r["tvl_impact_pct"] < -5  else "#8b949e"
         contagion    = " 🔗" if r["is_contagion"] else ""
         breach_str   = "<span style='color:#f85149'>YES</span>" if r["crosses_threshold"] else "—"
+        
+        holding_tds = ""
+        if has_holdings:
+            val = user_holdings.get(r['protocol'], 0.0)
+            if val > 0:
+                loss = val * (r['tvl_impact_pct'] / 100.0)
+                loss_color = "#f85149" if loss < 0 else "#e6edf3"
+                holding_tds = f"<td style='color:#e6edf3'>${val:,.0f}</td><td style='color:{loss_color}'>${loss:,.0f}</td>"
+            else:
+                holding_tds = "<td style='color:#8b949e'>—</td><td style='color:#8b949e'>—</td>"
+
         table_html  += f"""
-        <tr class="{breach_class}">
-          <td><b>{r['protocol']}{contagion}</b></td>
-          <td style="color:#8b949e">{r['category']}</td>
-          <td style="color:{_score_color(r['before_score'])}">{r['before_score']:.1f}</td>
-          <td style="color:{_score_color(r['after_score'])}">{r['after_score']:.1f}</td>
-          <td style="color:{delta_color}">+{r['score_delta']:.1f}</td>
-          <td style="color:{tvl_color}">{r['tvl_impact_pct']:+.1f}%</td>
-          <td>{breach_str}</td>
-        </tr>"""
+<tr class="{breach_class}">
+  <td><b>{r['protocol']}{contagion}</b></td>
+  <td style="color:#8b949e">{r['category']}</td>
+  <td style="color:{_score_color(r['before_score'])}">{r['before_score']:.1f}</td>
+  <td style="color:{_score_color(r['after_score'])}">{r['after_score']:.1f}</td>
+  <td style="color:{delta_color}">+{r['score_delta']:.1f}</td>
+  <td style="color:{tvl_color}">{r['tvl_impact_pct']:+.1f}%</td>
+  {holding_tds}
+  <td>{breach_str}</td>
+</tr>"""
 
     table_html += "</table>"
     st.markdown(table_html, unsafe_allow_html=True)

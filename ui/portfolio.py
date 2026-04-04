@@ -72,17 +72,20 @@ def _portfolio_risk_calculator(scores: dict):
     with st.expander("Enter holdings (USD)", expanded=True):
         cols = st.columns(4)
         for i, name in enumerate(protocol_names):
+            current_val = st.session_state.get("portfolio_holdings", {}).get(name, 0.0)
             val = cols[i % 4].number_input(
-                name, min_value=0.0, value=0.0, step=100.0,
+                name, min_value=0.0, value=float(current_val), step=100.0,
                 format="%.0f", key=f"holding_{name}", label_visibility="visible"
             )
             if val > 0:
                 holdings[name] = val
 
     if not holdings:
+        st.session_state.portfolio_holdings = {}
         st.info("Enter at least one holding above to see your portfolio risk score.")
         return
 
+    st.session_state.portfolio_holdings = holdings
     total = sum(holdings.values())
     weights = {n: v / total for n, v in holdings.items()}
     port_score = sum(weights[n] * scores[n]["composite"] for n in holdings)
