@@ -3,12 +3,13 @@ Fetches data from:
   - DeFiLlama    (TVL history, free, no key)
   - CoinGecko    (prices + 30d OHLC, free tier)
   - Alternative.me (Fear & Greed Index, free, no key)
-  - newsdata.io  (news headlines, requires NEWSDATA_API_KEY) + Qwen LLM sentiment (Ollama, local)
+  - newsdata.io  (news headlines, requires NEWSDATA_API_KEY) + Claude Haiku sentiment (Anthropic API)
 
 Free-tier rate limits enforced:
   DeFiLlama    — 1.0s between calls (no published limit; conservative)
   CoinGecko    — 2.0s between calls (30 req/min on the public endpoint)
   newsdata.io  — 200 req/day on free tier; no per-second limit documented
+  Anthropic    — Claude Haiku; no hard rate limit on standard tier
   Alternative.me — single call per session; no constraint needed
 
 Sleeps only fire when a live network request is made.
@@ -48,10 +49,11 @@ _SSL.verify_mode = ssl.CERT_NONE
 LLAMA_BASE        = "https://api.llama.fi"
 GECKO_BASE        = "https://api.coingecko.com/api/v3"
 FNG_URL           = "https://api.alternative.me/fng/?limit=7"
-NEWSDATA_BASE     = "https://newsdata.io/api/1/news"
-_NEWSDATA_API_KEY = os.environ.get("NEWSDATA_API_KEY", "")
-_OLLAMA_URL       = os.environ.get("OLLAMA_URL",   "http://localhost:11434")
-_OLLAMA_MODEL     = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
+NEWSDATA_BASE      = "https://newsdata.io/api/1/news"
+ANTHROPIC_BASE     = "https://api.anthropic.com/v1/messages"
+_NEWSDATA_API_KEY  = os.environ.get("NEWSDATA_API_KEY", "")
+_ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+_CLAUDE_MODEL      = "claude-haiku-4-5-20251001"
 
 
 def _get(url: str, timeout: int = 15) -> dict | list:
@@ -259,38 +261,50 @@ def _fetch_whale_dominance(proposal_id: str, scores_total: float) -> float:
         return 0.0
 
 
-def _classify_proposal_llm(title: str, body: str) -> str:
-    """Uses Ollama to categorize a proposal into Treasury, Technical, or Social."""
-    text = f"{title}\n\n{body}"[:1000]
-    prompt = (
-        "You are an expert crypto governance analyst. Categorize the following proposal "
-        "into exactly ONE of these three categories: 'Treasury', 'Technical', or 'Social'. "
-        "Return ONLY the category word as a JSON object with a 'category' key. Nothing else.\n\n"
-        f"Proposal:\n{text}"
-    )
+def _claude(system: str, user: str, max_tokens: int = 128) -> str | None:
+    """Call Claude Haiku. Returns the text response or None on failure."""
+    if not _ANTHROPIC_API_KEY:
+        return None
     payload = json.dumps({
-        "model":   _OLLAMA_MODEL,
-        "prompt":  prompt,
-        "stream":  False,
-        "format":  "json",
-        "options": {"temperature": 0.0},
+        "model":      _CLAUDE_MODEL,
+        "max_tokens": max_tokens,
+        "system":     system,
+        "messages":   [{"role": "user", "content": user}],
     }).encode()
     try:
         req = urllib.request.Request(
-            f"{_OLLAMA_URL}/api/generate",
+            ANTHROPIC_BASE,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "x-api-key":         _ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=10) as r:
-            resp   = json.loads(r.read())
-            parsed = json.loads(resp.get("response", "{}"))
-            cat = parsed.get("category", "")
+        with urllib.request.urlopen(req, timeout=20, context=_SSL) as r:
+            return json.loads(r.read())["content"][0]["text"]
+    except Exception:
+        return None
+
+
+def _classify_proposal_llm(title: str, body: str) -> str:
+    """Uses Claude Haiku to categorize a proposal into Treasury, Technical, or Social."""
+    text = f"{title}\n\n{body}"[:1000]
+    system = (
+        "You are an expert crypto governance analyst. Categorize the proposal "
+        "into exactly ONE of: 'Treasury', 'Technical', or 'Social'. "
+        "Return ONLY a JSON object with a 'category' key. No other text."
+    )
+    resp = _claude(system, f"Proposal:\n{text}")
+    if resp:
+        try:
+            cat = json.loads(resp).get("category", "")
             if cat in ("Treasury", "Technical", "Social"):
                 return cat
-            return "Mixed"
-    except Exception:
-        return "Unknown"
+        except Exception:
+            pass
+    return "Unknown"
 
 
 def fetch_governance_activity() -> dict[str, dict]:
@@ -479,47 +493,30 @@ _NEG = frozenset({
 
 
 def _score_headlines_llm(headlines: list[str]) -> float | None:
-    """Send headlines to a locally-running Ollama model.
-    Returns a float in [-1, 1] or None if Ollama is unavailable."""
+    """Score headlines with Claude Haiku. Returns [-1, 1] or None on failure."""
     if not headlines:
         return 0.0
 
     bullet_list = "\n".join(f"- {h}" for h in headlines)
-    prompt = (
-        "You are a DeFi risk analyst. Given the news headlines below, "
-        "return a single JSON object with one key 'score' — a float from "
-        "-1.0 (very bearish / high risk) to 1.0 (very bullish / low risk). "
-        "Consider hacks, exploits, and regulatory actions as strongly negative. "
-        "Protocol launches, audits, and TVL growth as positive. "
-        "Return ONLY the JSON, no explanation.\n\n"
-        f"Headlines:\n{bullet_list}"
+    system = (
+        "You are a DeFi risk analyst. Given news headlines, return a single JSON object "
+        "with one key 'score' — a float from -1.0 (very bearish / high risk) to "
+        "1.0 (very bullish / low risk). Hacks, exploits, and regulatory actions are "
+        "strongly negative. Audits, launches, and TVL growth are positive. "
+        "Return ONLY the JSON, no explanation."
     )
-    payload = json.dumps({
-        "model":   _OLLAMA_MODEL,
-        "prompt":  prompt,
-        "stream":  False,
-        "format":  "json",
-        "options": {"temperature": 0.0},
-    }).encode()
-
-    try:
-        req = urllib.request.Request(
-            f"{_OLLAMA_URL}/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=20) as r:
-            resp   = json.loads(r.read())
-            parsed = json.loads(resp.get("response", "{}"))
-            score  = float(parsed.get("score", 0.0))
+    resp = _claude(system, f"Headlines:\n{bullet_list}", max_tokens=32)
+    if resp:
+        try:
+            score = float(json.loads(resp).get("score", 0.0))
             return max(-1.0, min(1.0, score))
-    except Exception:
-        return None
+        except Exception:
+            pass
+    return None
 
 
 def _score_headlines(headlines: list[str]) -> float:
-    """LLM scoring via Ollama with keyword fallback if Ollama is unavailable."""
+    """Claude Haiku scoring with keyword fallback if API is unavailable."""
     llm_score = _score_headlines_llm(headlines)
     if llm_score is not None:
         return llm_score

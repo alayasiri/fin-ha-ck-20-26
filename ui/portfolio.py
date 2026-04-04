@@ -15,34 +15,43 @@ _SIG_META = {
     "EXIT":     {"color": "#dc2626", "icon": "✕", "desc": "Risk threshold exceeded, exit or hedge"},
 }
 
-_OLLAMA_URL   = os.environ.get("OLLAMA_URL",   "http://localhost:11434")
-_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
+_ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 def _generate_executive_summary(scores: dict) -> str:
     high_risk = [name for name, d in scores.items() if d.get("signal") in ("EXIT", "REDUCE")]
     if not high_risk:
-        prompt = "You are a professional financial risk analyst reporting to a portfolio manager. Provide a concise, two-sentence executive summary stating that all tracked protocols are currently stable and outside the high-risk zone. Avoid filler words, emojis, and exaggerated language."
+        content = "All tracked protocols are currently stable and outside the high-risk zone."
     else:
-        prompt = f"You are a professional financial risk analyst reporting to a portfolio manager. Provide a concise, two-sentence executive summary advising caution regarding the following specific assets flagged for immediate risk reduction or exit: {', '.join(high_risk)}. Avoid filler words, emojis, and exaggerated language."
+        content = f"Advise caution regarding the following assets flagged for immediate risk reduction or exit: {', '.join(high_risk)}."
+
+    system = "You are a professional financial risk analyst reporting to a portfolio manager. Provide a concise, two-sentence executive summary. Avoid filler words, emojis, and exaggerated language."
 
     payload = json.dumps({
-        "model":   _OLLAMA_MODEL,
-        "prompt":  prompt,
-        "stream":  False,
-        "options": {"temperature": 0.2},
+        "model":      "claude-haiku-4-5-20251001",
+        "max_tokens": 256,
+        "system":     system,
+        "messages":   [{"role": "user", "content": content}],
     }).encode()
     try:
         req = urllib.request.Request(
-            f"{_OLLAMA_URL}/api/generate",
+            "https://api.anthropic.com/v1/messages",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "x-api-key":         _ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=15) as r:
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
             resp = json.loads(r.read())
-            return resp.get("response", "AI Summary unavailable at the moment.")
-    except Exception:
-        return "AI Summary engine is currently unreachable. Check local Ollama connection."
+            return resp["content"][0]["text"]
+    except Exception as e:
+        return f"Summary unavailable: {e}"
 
 
 

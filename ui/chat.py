@@ -39,29 +39,9 @@ def _anthropic_chat(api_key: str, system_prompt: str, messages: list) -> str:
 
 def render(scores: dict, anomalies: dict, data: dict):
     st.markdown("## AI Risk Assistant")
-    st.caption("Ask questions about protocol risk, market conditions, or your portfolio. Powered by Claude 3 Opus.")
+    st.caption("Ask questions about protocol risk, market conditions, or your portfolio. Powered by Claude Opus.")
 
-    # Load from .env file if it exists
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass
-
-    # API Key Input
-    api_key_env = os.environ.get("ANTHROPIC_API_KEY", "")
-    
-    # Manual fallback parser in case python-dotenv isn't installed
-    if not api_key_env and os.path.exists(".env"):
-        try:
-            with open(".env", "r") as f:
-                for line in f:
-                    if line.strip().startswith("ANTHROPIC_API_KEY="):
-                        api_key_env = line.split("=", 1)[1].strip().strip('"').strip("'")
-        except Exception:
-            pass
-
-    api_key = st.sidebar.text_input("Anthropic API Key", value=api_key_env, type="password", help="Enter your Anthropic API Key or set ANTHROPIC_API_KEY in your environment.")
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
     # Format the current system state
     system_prompt = (
