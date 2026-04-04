@@ -30,19 +30,19 @@ def _alert_banner(scores: dict, anomalies: dict):
     alerts = []
     if exits:
         alerts.append((
-            "#f85149", "#2a1015",
+            "#dc2626", "#fef2f2",
             "EXIT",
             f"{', '.join(exits)} — risk scores exceed safe threshold",
         ))
     if reduces:
         alerts.append((
-            "#e3b341", "#251e0a",
+            "#d97706", "#fffbeb",
             "REDUCE",
             f"{', '.join(reduces)} — elevated risk, consider trimming",
         ))
     if high_anom:
         alerts.append((
-            "#f0883e", "#251505",
+            "#ea580c", "#fff7ed",
             "ANOMALY",
             f"High-severity on-chain activity: {', '.join(high_anom)}",
         ))
@@ -58,7 +58,7 @@ def _alert_banner(scores: dict, anomalies: dict):
             f"padding:9px 14px;border-radius:0 6px 6px 0;margin-bottom:6px'>"
             f"<span style='color:{color};font-size:11px;font-weight:700;"
             f"letter-spacing:.06em;white-space:nowrap'>{tag}</span>"
-            f"<span style='color:#e6edf3;font-size:13px'>{msg}</span>"
+            f"<span style='color:#1e293b;font-size:13px'>{msg}</span>"
             f"</div>"
         )
     st.markdown(rows, unsafe_allow_html=True)
@@ -75,11 +75,11 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
     # ── Risk band legend ───────────────────────────────────────────────────────
     st.markdown(
         "<div style='display:flex;gap:10px;margin-bottom:8px'>"
-        "<span style='background:#1a3a2a;color:#3fb950;padding:3px 12px;"
+        "<span style='background:#dcfce7;color:#16a34a;padding:3px 12px;"
         "border-radius:12px;font-size:12px;font-weight:600'>● LOW &nbsp;0–35</span>"
-        "<span style='background:#3a2a00;color:#e3b341;padding:3px 12px;"
+        "<span style='background:#fef9c3;color:#d97706;padding:3px 12px;"
         "border-radius:12px;font-size:12px;font-weight:600'>● MEDIUM &nbsp;35–60</span>"
-        "<span style='background:#3a1a1a;color:#f85149;padding:3px 12px;"
+        "<span style='background:#fee2e2;color:#dc2626;padding:3px 12px;"
         "border-radius:12px;font-size:12px;font-weight:600'>● HIGH &nbsp;60–100</span>"
         "</div>",
         unsafe_allow_html=True,
@@ -158,20 +158,20 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
         marker=dict(
             colors=colors,
             colorscale=[
-                [0.0,  "#1a7f37"],
-                [0.35, "#3fb950"],
-                [0.55, "#e3b341"],
-                [0.75, "#f0883e"],
-                [1.0,  "#cf222e"],
+                [0.0,  "#16a34a"],
+                [0.35, "#86efac"],
+                [0.55, "#fde68a"],
+                [0.75, "#fb923c"],
+                [1.0,  "#dc2626"],
             ],
             cmin=0,
             cmax=100,
             colorbar=dict(
-                title=dict(text="Risk Score", font=dict(color="#8b949e")),
+                title=dict(text="Risk Score", font=dict(color="#64748b")),
                 thickness=14,
-                tickfont=dict(color="#8b949e"),
+                tickfont=dict(color="#64748b"),
             ),
-            line=dict(width=1.5, color="#30363d"),
+            line=dict(width=1.5, color="#e2e8f0"),
         ),
         hovertemplate=(
             "<b>%{label}</b><br>"
@@ -182,13 +182,13 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
             "<extra></extra>"
         ),
         texttemplate="<b>%{label}</b><br>%{customdata[0]:.0f}",
-        textfont=dict(size=12, color="#e6edf3"),
+        textfont=dict(size=12, color="#1e293b"),
     ))
     fig.update_layout(
         height=460,
         margin=dict(t=10, b=10, l=10, r=10),
-        paper_bgcolor="#0d1117",
-        plot_bgcolor="#0d1117",
+        paper_bgcolor="#f0f4f8",
+        plot_bgcolor="#f0f4f8",
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -200,7 +200,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
     high_risk_protocols = [n for n, v in scores.items() if v["composite"] >= THRESHOLDS["medium"]]
     if high_risk_protocols:
         st.markdown(
-            "<span style='font-size:12px;color:#f85149;font-weight:600'>High-risk — explore in Deep Dive:</span>",
+            "<span style='font-size:12px;color:#dc2626;font-weight:600'>High-risk — explore in Deep Dive:</span>",
             unsafe_allow_html=True,
         )
         btn_cols = st.columns(min(len(high_risk_protocols), 5))
@@ -255,19 +255,19 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
     table_html = dedent("""
     <style>
     .risk-table { width:100%; border-collapse:collapse; font-size:13px; }
-    .risk-table th { background:#161b22; color:#8b949e; padding:8px 12px;
-                     text-align:left; border-bottom:1px solid #30363d; }
-    .risk-table td { padding:8px 12px; border-bottom:1px solid #21262d;
-                     color:#e6edf3; }
-    .risk-table tr:hover td { background:#1c2128; }
+    .risk-table th { background:#f1f5f9; color:#64748b; padding:8px 12px;
+                     text-align:left; border-bottom:1px solid #cbd5e1; }
+    .risk-table td { padding:8px 12px; border-bottom:1px solid #e2e8f0;
+                     color:#1e293b; }
+    .risk-table tr:hover td { background:#f8fafc; }
     .badge { padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
-    .badge-low    { background:#1a3a2a; color:#3fb950; }
-    .badge-medium { background:#3a2a00; color:#e3b341; }
-    .badge-high   { background:#3a1a1a; color:#f85149; }
-    .sig-increase { color:#3fb950; font-weight:700; }
-    .sig-hold     { color:#58a6ff; font-weight:700; }
-    .sig-reduce   { color:#e3b341; font-weight:700; }
-    .sig-exit     { color:#f85149; font-weight:700; }
+    .badge-low    { background:#dcfce7; color:#16a34a; }
+    .badge-medium { background:#fef9c3; color:#d97706; }
+    .badge-high   { background:#fee2e2; color:#dc2626; }
+    .sig-increase { color:#16a34a; font-weight:700; }
+    .sig-hold     { color:#2563eb; font-weight:700; }
+    .sig-reduce   { color:#d97706; font-weight:700; }
+    .sig-exit     { color:#dc2626; font-weight:700; }
     .score-bar-wrap { display:flex; align-items:center; gap:8px; }
     .score-bar { height:6px; border-radius:3px; display:inline-block; }
     </style>
@@ -293,17 +293,17 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
         ch1_str   = f"{ch1:+.1f}%"
         ch7_str   = f"{ch7:+.1f}%"
         # 1d drop below -5% gets a bright red highlight to flag flash crashes
-        ch1_color = "#f85149" if ch1 < -5 else ("#e3b341" if ch1 < 0 else "#3fb950")
-        ch7_color = "#f85149" if ch7 < 0 else "#3fb950"
+        ch1_color = "#dc2626" if ch1 < -5 else ("#d97706" if ch1 < 0 else "#16a34a")
+        ch7_color = "#dc2626" if ch7 < 0 else "#16a34a"
         dd_str    = f"{r['Drawdown']:.1f}%"
         band      = r["Band"]
         sig       = r["Signal"]
 
         table_html += dedent(f"""
         <tr>
-          <td style="color:#8b949e">{i}</td>
+          <td style="color:#64748b">{i}</td>
           <td><b>{r['Protocol']}</b></td>
-          <td style="color:#8b949e">{r['Category']}</td>
+          <td style="color:#64748b">{r['Category']}</td>
           <td>
             <div class="score-bar-wrap">
               <span>{score:.1f}</span>
@@ -314,9 +314,9 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
           <td>{tvl_str}</td>
           <td style="color:{ch1_color};font-weight:{'700' if ch1 < -5 else '400'}">{ch1_str}</td>
           <td style="color:{ch7_color}">{ch7_str}</td>
-          <td style="color:#8b949e">{dd_str}</td>
+          <td style="color:#64748b">{dd_str}</td>
           <td class="{sig_class.get(sig,'')}">{sig}</td>
-          <td style="color:{'#f85149' if r['Anomalies'] else '#8b949e'}">{r['Anomalies'] or '—'}</td>
+          <td style="color:{'#dc2626' if r['Anomalies'] else '#64748b'}">{r['Anomalies'] or '—'}</td>
                 </tr>""")
 
     table_html += "</table>"
@@ -329,20 +329,20 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
         fig2 = go.Figure(go.Scatter(
             y=list(reversed(history)),
             mode="lines+markers",
-            line=dict(color="#58a6ff", width=2),
-            marker=dict(size=6, color="#58a6ff"),
+            line=dict(color="#2563eb", width=2),
+            marker=dict(size=6, color="#2563eb"),
             fill="tozeroy",
-            fillcolor="rgba(88,166,255,0.1)",
+            fillcolor="rgba(37,99,235,0.08)",
         ))
-        fig2.add_hline(y=25, line_dash="dot", line_color="#f85149", opacity=0.5,
-                       annotation_text="Extreme Fear", annotation_font_color="#f85149")
-        fig2.add_hline(y=75, line_dash="dot", line_color="#3fb950", opacity=0.5,
-                       annotation_text="Extreme Greed", annotation_font_color="#3fb950")
+        fig2.add_hline(y=25, line_dash="dot", line_color="#dc2626", opacity=0.5,
+                       annotation_text="Extreme Fear", annotation_font_color="#dc2626")
+        fig2.add_hline(y=75, line_dash="dot", line_color="#16a34a", opacity=0.5,
+                       annotation_text="Extreme Greed", annotation_font_color="#16a34a")
         fig2.update_layout(
             height=160, margin=dict(t=10, b=10, l=0, r=0),
-            paper_bgcolor="#0d1117", plot_bgcolor="#161b22",
-            yaxis=dict(range=[0, 100], gridcolor="#21262d", color="#8b949e"),
-            xaxis=dict(showgrid=False, color="#8b949e"),
+            paper_bgcolor="#f0f4f8", plot_bgcolor="#ffffff",
+            yaxis=dict(range=[0, 100], gridcolor="#e2e8f0", color="#64748b"),
+            xaxis=dict(showgrid=False, color="#64748b"),
             showlegend=False,
         )
         st.plotly_chart(fig2, use_container_width=True)

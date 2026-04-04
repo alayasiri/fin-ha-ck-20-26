@@ -19,21 +19,22 @@ st.markdown("""
   .block-container { padding-top: 3.5rem; padding-bottom: 1rem; }
   /* Metric card styling */
   [data-testid="metric-container"] {
-    background: #161b22;
-    border: 1px solid #30363d;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
     border-radius: 8px;
     padding: 12px 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
   }
-  [data-testid="metric-container"] label { color: #8b949e !important; font-size: 12px; }
+  [data-testid="metric-container"] label { color: #64748b !important; font-size: 12px; }
   [data-testid="metric-container"] [data-testid="stMetricValue"] {
-    color: #e6edf3 !important; font-size: 22px; font-weight: 700;
+    color: #1e293b !important; font-size: 22px; font-weight: 700;
   }
   /* Sidebar */
-  [data-testid="stSidebar"] { background: #0d1117; border-right: 1px solid #21262d; }
+  [data-testid="stSidebar"] { background: #f8fafc; border-right: 1px solid #e2e8f0; }
   /* Divider */
-  hr { border-color: #21262d; margin: 0.6rem 0; }
+  hr { border-color: #e2e8f0; margin: 0.6rem 0; }
   /* Selectbox */
-  [data-testid="stSelectbox"] label { color: #8b949e; font-size: 12px; }
+  [data-testid="stSelectbox"] label { color: #64748b; font-size: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -105,9 +106,9 @@ _PAGE_META = {
 
 with st.sidebar:
     st.markdown(
-        "<div style='font-size:20px;font-weight:700;color:#e6edf3;margin-bottom:2px'>"
+        "<div style='font-size:20px;font-weight:700;color:#1e293b;margin-bottom:2px'>"
         "DeFi Risk Monitor</div>"
-        "<div style='font-size:11px;color:#8b949e'>Top-20 protocols · Live on-chain data</div>",
+        "<div style='font-size:11px;color:#64748b'>Top-20 protocols · Live on-chain data</div>",
         unsafe_allow_html=True,
     )
 
@@ -119,18 +120,18 @@ with st.sidebar:
         high = sum(1 for v in sc.values() if v["composite"] >= THRESHOLDS["medium"])
         st.markdown(
             f"<div style='display:flex;gap:6px;margin:8px 0 4px'>"
-            f"<span style='background:#1a3a2a;color:#3fb950;padding:2px 8px;"
+            f"<span style='background:#dcfce7;color:#16a34a;padding:2px 8px;"
             f"border-radius:10px;font-size:11px'>✓ {low} Low</span>"
-            f"<span style='background:#3a2a00;color:#e3b341;padding:2px 8px;"
+            f"<span style='background:#fef9c3;color:#d97706;padding:2px 8px;"
             f"border-radius:10px;font-size:11px'>⚠ {med} Med</span>"
-            f"<span style='background:#3a1a1a;color:#f85149;padding:2px 8px;"
+            f"<span style='background:#fee2e2;color:#dc2626;padding:2px 8px;"
             f"border-radius:10px;font-size:11px'>✕ {high} High</span>"
             f"</div>",
             unsafe_allow_html=True,
         )
 
     st.divider()
-    st.markdown("<div style='font-size:11px;color:#8b949e;margin-bottom:6px'>NAVIGATE</div>",
+    st.markdown("<div style='font-size:11px;color:#64748b;margin-bottom:6px'>NAVIGATE</div>",
                 unsafe_allow_html=True)
 
     for _pg, desc in _PAGE_META.items():

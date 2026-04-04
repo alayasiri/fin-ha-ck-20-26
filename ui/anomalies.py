@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-_SEV_COLOR  = {"low": "#e3b341", "medium": "#f0883e", "high": "#f85149"}
+_SEV_COLOR  = {"low": "#d97706", "medium": "#ea580c", "high": "#dc2626"}
 _TYPE_LABEL = {
     "tvl_spike":            "TVL Spike / Drop",
     "multivariate_anomaly": "Multivariate Anomaly",
@@ -74,7 +74,7 @@ def render(anomalies: dict, scores: dict):
     sorted_protos = sorted(proto_counts, key=lambda p: sum(proto_counts[p].values()), reverse=True)
 
     fig = go.Figure()
-    for sev, color in [("high","#f85149"),("medium","#f0883e"),("low","#e3b341")]:
+    for sev, color in [("high","#dc2626"),("medium","#ea580c"),("low","#d97706")]:
         fig.add_trace(go.Bar(
             name=sev.capitalize(),
             x=sorted_protos,
@@ -86,11 +86,11 @@ def render(anomalies: dict, scores: dict):
         barmode="stack",
         height=280,
         margin=dict(t=10, b=10, l=10, r=10),
-        paper_bgcolor="#0d1117",
-        plot_bgcolor="#161b22",
-        xaxis=dict(tickangle=-30, tickfont=dict(color="#e6edf3"), gridcolor="#21262d"),
-        yaxis=dict(gridcolor="#21262d", color="#8b949e"),
-        legend=dict(bgcolor="#0d1117", font=dict(color="#e6edf3")),
+        paper_bgcolor="#f0f4f8",
+        plot_bgcolor="#ffffff",
+        xaxis=dict(tickangle=-30, tickfont=dict(color="#1e293b"), gridcolor="#e2e8f0"),
+        yaxis=dict(gridcolor="#e2e8f0", color="#64748b"),
+        legend=dict(bgcolor="#ffffff", font=dict(color="#1e293b")),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -106,17 +106,17 @@ def render(anomalies: dict, scores: dict):
 
         st.markdown(
             f"""<div style='padding:8px 14px;margin:5px 0;border-left:3px solid {c};
-            background:#161b22;border-radius:0 6px 6px 0;'>
+            background:#ffffff;border-radius:0 6px 6px 0;box-shadow:0 1px 3px rgba(0,0,0,0.06)'>
             <div style='display:flex;justify-content:space-between;align-items:center'>
-              <span style='font-weight:700;color:#e6edf3'>{ev['protocol']}</span>
-              <span style='font-size:11px;color:#8b949e'>{ev['date']}</span>
+              <span style='font-weight:700;color:#1e293b'>{ev['protocol']}</span>
+              <span style='font-size:11px;color:#64748b'>{ev['date']}</span>
             </div>
             <div style='margin-top:3px;font-size:13px'>
               <span style='background:{c}22;color:{c};padding:1px 7px;
                 border-radius:10px;font-size:11px;font-weight:600'>{sev.upper()}</span>
-              &nbsp;<span style='color:#8b949e'>{ttype}</span>
+              &nbsp;<span style='color:#64748b'>{ttype}</span>
             </div>
-            <div style='margin-top:4px;font-size:13px;color:#e6edf3'>
+            <div style='margin-top:4px;font-size:13px;color:#1e293b'>
               {ev['description']}{pct_str}
             </div>
             </div>""",
@@ -133,20 +133,20 @@ def render(anomalies: dict, scores: dict):
         fig2 = go.Figure(go.Histogram(
             x=z_scores,
             nbinsx=20,
-            marker_color="#58a6ff",
+            marker_color="#2563eb",
             opacity=0.8,
         ))
-        fig2.add_vline(x=-2.5, line_dash="dot", line_color="#f85149", opacity=0.7,
+        fig2.add_vline(x=-2.5, line_dash="dot", line_color="#dc2626", opacity=0.7,
                        annotation_text="−2.5σ threshold")
-        fig2.add_vline(x=2.5, line_dash="dot", line_color="#f85149", opacity=0.7,
+        fig2.add_vline(x=2.5, line_dash="dot", line_color="#dc2626", opacity=0.7,
                        annotation_text="+2.5σ threshold")
         fig2.update_layout(
             height=220,
             margin=dict(t=10, b=10, l=10, r=10),
-            paper_bgcolor="#0d1117",
-            plot_bgcolor="#161b22",
-            xaxis=dict(title="Z-Score", color="#8b949e", gridcolor="#21262d"),
-            yaxis=dict(title="Count", gridcolor="#21262d", color="#8b949e"),
+            paper_bgcolor="#f0f4f8",
+            plot_bgcolor="#ffffff",
+            xaxis=dict(title="Z-Score", color="#64748b", gridcolor="#e2e8f0"),
+            yaxis=dict(title="Count", gridcolor="#e2e8f0", color="#64748b"),
             showlegend=False,
         )
         st.plotly_chart(fig2, use_container_width=True)

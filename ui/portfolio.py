@@ -9,10 +9,10 @@ from config import PROTOCOLS, THRESHOLDS
 
 
 _SIG_META = {
-    "INCREASE": {"color": "#3fb950", "icon": "▲", "desc": "Strong metrics, consider adding exposure"},
-    "HOLD":     {"color": "#58a6ff", "icon": "●", "desc": "Acceptable risk, maintain current positions"},
-    "REDUCE":   {"color": "#e3b341", "icon": "▼", "desc": "Elevated risk, trim position size"},
-    "EXIT":     {"color": "#f85149", "icon": "✕", "desc": "Risk threshold exceeded, exit or hedge"},
+    "INCREASE": {"color": "#16a34a", "icon": "▲", "desc": "Strong metrics, consider adding exposure"},
+    "HOLD":     {"color": "#2563eb", "icon": "●", "desc": "Acceptable risk, maintain current positions"},
+    "REDUCE":   {"color": "#d97706", "icon": "▼", "desc": "Elevated risk, trim position size"},
+    "EXIT":     {"color": "#dc2626", "icon": "✕", "desc": "Risk threshold exceeded, exit or hedge"},
 }
 
 _OLLAMA_URL   = os.environ.get("OLLAMA_URL",   "http://localhost:11434")
@@ -91,7 +91,7 @@ def _portfolio_risk_calculator(scores: dict):
     port_score = sum(weights[n] * scores[n]["composite"] for n in holdings)
     band = "LOW" if port_score < THRESHOLDS["low"] else \
            ("MEDIUM" if port_score < THRESHOLDS["medium"] else "HIGH")
-    band_color = {"LOW": "#3fb950", "MEDIUM": "#e3b341", "HIGH": "#f85149"}[band]
+    band_color = {"LOW": "#16a34a", "MEDIUM": "#d97706", "HIGH": "#dc2626"}[band]
 
     m1, m2, m3 = st.columns(3)
     m1.metric("Portfolio Risk Score", f"{port_score:.1f} / 100")
@@ -110,24 +110,24 @@ def _portfolio_risk_calculator(scores: dict):
         y=[n for n, _ in contrib_sorted],
         orientation="h",
         marker_color=[
-            "#f85149" if scores[n]["composite"] >= THRESHOLDS["medium"] else
-            "#e3b341" if scores[n]["composite"] >= THRESHOLDS["low"] else "#3fb950"
+            "#dc2626" if scores[n]["composite"] >= THRESHOLDS["medium"] else
+            "#d97706" if scores[n]["composite"] >= THRESHOLDS["low"] else "#16a34a"
             for n, _ in contrib_sorted
         ],
         text=[f"{c:.1f} pts  ({weights[n]*100:.1f}% allocation)"
               for n, c in contrib_sorted],
         textposition="outside",
-        textfont=dict(color="#8b949e", size=11),
+        textfont=dict(color="#64748b", size=11),
         hovertemplate="%{y}<br>Risk contribution: %{x:.2f} pts<extra></extra>",
     ))
     fig.update_layout(
         title=dict(text="Risk contribution by protocol (weight × score)",
-                   font=dict(color="#8b949e", size=12)),
+                   font=dict(color="#64748b", size=12)),
         height=max(220, len(holdings) * 32),
         margin=dict(t=30, b=10, l=10, r=140),
-        paper_bgcolor="#0d1117", plot_bgcolor="#161b22",
-        xaxis=dict(gridcolor="#21262d", color="#8b949e"),
-        yaxis=dict(autorange="reversed", tickfont=dict(color="#e6edf3")),
+        paper_bgcolor="#f0f4f8", plot_bgcolor="#ffffff",
+        xaxis=dict(gridcolor="#e2e8f0", color="#64748b"),
+        yaxis=dict(autorange="reversed", tickfont=dict(color="#1e293b")),
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -155,10 +155,37 @@ def render(scores: dict, anomalies: dict):
         "on-chain anomaly count, and sentiment overlay."
     )
 
-    if st.button("Generate Executive Summary", help="Generate an automated risk overview"):
-        with st.spinner("Generating summary..."):
+    # ── AI Executive Summary ───────────────────────────────────────────────────
+    st.markdown("### AI Executive Summary")
+    
+    if st.button("Generate Summary", type="primary"):
+        with st.spinner("Analyzing portfolio risk vectors..."):
             summary = _generate_executive_summary(scores)
-            st.info(f"**Executive Brief:**\n\n{summary}")
+            st.markdown(
+                f"<div style='background:#ffffff;padding:16px;border-radius:8px;border-left:4px solid #2563eb;margin-top:8px;"
+                f"color:#1e293b;font-size:14px;line-height:1.6;box-shadow:0 1px 4px rgba(0,0,0,0.08)'>{summary}</div>",
+                unsafe_allow_html=True
+            )
+            
+    # ── Portfolio News Feed ────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### Portfolio News Feed")
+    st.caption("Recent GDELT headlines specifically related to the assets in your portfolio.")
+    
+    holdings = st.session_state.get("portfolio_holdings", {})
+    headlines_data = st.session_state.get("data", {}).get("headlines", {})
+    has_news = False
+    
+    for proto in sorted(holdings.keys(), key=lambda k: holdings[k], reverse=True):
+        proto_headlines = headlines_data.get(proto, [])
+        if proto_headlines:
+            has_news = True
+            with st.expander(f"Recent Headlines — {proto}", expanded=False):
+                for hl in proto_headlines[:5]:
+                    st.markdown(f"- {hl}")
+                    
+    if not has_news:
+        st.info("No major news flagged for your held assets in the last 7 days.")
 
     _portfolio_risk_calculator(scores)
 
@@ -172,11 +199,11 @@ def render(scores: dict, anomalies: dict):
     for col, sig in zip([col1, col2, col3, col4], ["INCREASE","HOLD","REDUCE","EXIT"]):
         m = _SIG_META[sig]
         col.markdown(
-            f"<div style='padding:12px;background:#161b22;border-radius:8px;"
-            f"border-top:3px solid {m['color']};text-align:center'>"
+            f"<div style='padding:12px;background:#ffffff;border-radius:8px;"
+            f"border-top:3px solid {m['color']};text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08)'>"
             f"<div style='font-size:22px;font-weight:700;color:{m['color']}'>"
             f"{m['icon']} {len(by_signal[sig])}</div>"
-            f"<div style='color:#8b949e;font-size:12px;margin-top:4px'>{sig}</div>"
+            f"<div style='color:#64748b;font-size:12px;margin-top:4px'>{sig}</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -201,25 +228,25 @@ def render(scores: dict, anomalies: dict):
         alloc  = _max_allocation(score)
         cat    = data.get("category", "")
         ch7    = data.get("change_7d", 0)
-        ch7_c  = "#3fb950" if ch7 > 0 else "#f85149"
+        ch7_c  = "#16a34a" if ch7 > 0 else "#dc2626"
 
         with st.container():
             st.markdown(
-                f"""<div style='padding:10px 14px;margin:4px 0;background:#161b22;
-                border-radius:8px;border-left:4px solid {m['color']}'>
+                f"""<div style='padding:10px 14px;margin:4px 0;background:#ffffff;
+                border-radius:8px;border-left:4px solid {m['color']};box-shadow:0 1px 3px rgba(0,0,0,0.07)'>
                 <div style='display:flex;justify-content:space-between;align-items:flex-start'>
                   <div>
-                    <span style='font-weight:700;font-size:15px;color:#e6edf3'>{name}</span>
-                    &nbsp;<span style='color:#8b949e;font-size:12px'>{cat}</span>
-                    {'&nbsp;<span style="color:#f85149;font-size:11px">⚠ '+str(anom)+' anomaly</span>' if anom else ''}
+                    <span style='font-weight:700;font-size:15px;color:#1e293b'>{name}</span>
+                    &nbsp;<span style='color:#64748b;font-size:12px'>{cat}</span>
+                    {'&nbsp;<span style="color:#dc2626;font-size:11px">⚠ '+str(anom)+' anomaly</span>' if anom else ''}
                   </div>
                   <div style='text-align:right'>
                     <span style='font-size:18px;font-weight:700;color:{m['color']}'>{m['icon']} {sig}</span>
-                    <br><span style='font-size:11px;color:#8b949e'>Max allocation: {alloc:.0f}%</span>
+                    <br><span style='font-size:11px;color:#64748b'>Max allocation: {alloc:.0f}%</span>
                   </div>
                 </div>
-                <div style='margin-top:6px;font-size:12px;color:#8b949e'>
-                  Risk score: <span style='color:#e6edf3'>{score:.1f}</span> &nbsp;·&nbsp;
+                <div style='margin-top:6px;font-size:12px;color:#64748b'>
+                  Risk score: <span style='color:#1e293b'>{score:.1f}</span> &nbsp;·&nbsp;
                   7d TVL: <span style='color:{ch7_c}'>{ch7:+.1f}%</span> &nbsp;·&nbsp;
                   {data.get('rationale','')}
                 </div>
@@ -245,16 +272,16 @@ def render(scores: dict, anomalies: dict):
         marker_color=colors_c,
         text=[f"{a:.0f}%" for a in allocs_c],
         textposition="outside",
-        textfont=dict(color="#8b949e"),
+        textfont=dict(color="#64748b"),
         hovertemplate="%{y}<br>Max allocation: %{x}%<extra></extra>",
     ))
     fig.update_layout(
         height=max(280, len(names_c) * 28),
         margin=dict(t=10, b=10, l=10, r=60),
-        paper_bgcolor="#0d1117",
-        plot_bgcolor="#161b22",
-        xaxis=dict(gridcolor="#21262d", color="#8b949e", ticksuffix="%", range=[0,25]),
-        yaxis=dict(autorange="reversed", tickfont=dict(color="#e6edf3")),
+        paper_bgcolor="#f0f4f8",
+        plot_bgcolor="#ffffff",
+        xaxis=dict(gridcolor="#e2e8f0", color="#64748b", ticksuffix="%", range=[0,25]),
+        yaxis=dict(autorange="reversed", tickfont=dict(color="#1e293b")),
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -286,22 +313,22 @@ def render(scores: dict, anomalies: dict):
         x=all_names,
         y=all_names,
         colorscale=[
-            [0.0, "#0d1117"],
-            [0.4, "#1f3a5f"],
-            [0.7, "#1a7f37"],
-            [1.0, "#f85149"],
+            [0.0, "#f0f4f8"],
+            [0.4, "#bfdbfe"],
+            [0.7, "#16a34a"],
+            [1.0, "#dc2626"],
         ],
         zmin=0, zmax=1,
         hovertemplate="%{y} ↔ %{x}<br>Similarity: %{z:.2f}<extra></extra>",
         showscale=True,
-        colorbar=dict(thickness=12, tickfont=dict(color="#8b949e")),
+        colorbar=dict(thickness=12, tickfont=dict(color="#64748b")),
     ))
     fig2.update_layout(
         height=520,
         margin=dict(t=10, b=10, l=10, r=10),
-        paper_bgcolor="#0d1117",
-        xaxis=dict(tickangle=-45, tickfont=dict(size=10, color="#8b949e")),
-        yaxis=dict(tickfont=dict(size=10, color="#8b949e")),
+        paper_bgcolor="#f0f4f8",
+        xaxis=dict(tickangle=-45, tickfont=dict(size=10, color="#64748b")),
+        yaxis=dict(tickfont=dict(size=10, color="#64748b")),
     )
     st.plotly_chart(fig2, use_container_width=True)
 

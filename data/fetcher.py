@@ -1,14 +1,14 @@
 """
 Fetches data from:
-  - DeFiLlama (TVL history, free, no key)
-  - CoinGecko  (prices + 30d OHLC, free tier)
+  - DeFiLlama    (TVL history, free, no key)
+  - CoinGecko    (prices + 30d OHLC, free tier)
   - Alternative.me (Fear & Greed Index, free, no key)
-  - GDELT      (news headlines, free, no key) + Qwen LLM sentiment (Ollama, local)
+  - newsdata.io  (news headlines, requires NEWSDATA_API_KEY) + Qwen LLM sentiment (Ollama, local)
 
 Free-tier rate limits enforced:
-  DeFiLlama   — 1.0s between calls (no published limit; conservative)
-  CoinGecko   — 2.0s between calls (30 req/min on the public endpoint)
-  GDELT       — 1.0s between calls (recommended by GDELT docs)
+  DeFiLlama    — 1.0s between calls (no published limit; conservative)
+  CoinGecko    — 2.0s between calls (30 req/min on the public endpoint)
+  newsdata.io  — 200 req/day on free tier; no per-second limit documented
   Alternative.me — single call per session; no constraint needed
 
 Sleeps only fire when a live network request is made.
@@ -18,6 +18,19 @@ import json
 import os
 import ssl
 import time
+
+# Load .env before reading environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # Manual fallback if python-dotenv not installed
+    if os.path.exists(".env"):
+        with open(".env") as _f:
+            for _line in _f:
+                if "=" in _line and not _line.strip().startswith("#"):
+                    _k, _, _v = _line.strip().partition("=")
+                    os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,12 +45,13 @@ _SSL = ssl.create_default_context()
 _SSL.check_hostname = False
 _SSL.verify_mode = ssl.CERT_NONE
 
-LLAMA_BASE    = "https://api.llama.fi"
-GECKO_BASE    = "https://api.coingecko.com/api/v3"
-FNG_URL       = "https://api.alternative.me/fng/?limit=7"
-GDELT_BASE    = "https://api.gdeltproject.org/api/v2/doc/doc"
-_OLLAMA_URL   = os.environ.get("OLLAMA_URL",   "http://localhost:11434")
-_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
+LLAMA_BASE        = "https://api.llama.fi"
+GECKO_BASE        = "https://api.coingecko.com/api/v3"
+FNG_URL           = "https://api.alternative.me/fng/?limit=7"
+NEWSDATA_BASE     = "https://newsdata.io/api/1/news"
+_NEWSDATA_API_KEY = os.environ.get("NEWSDATA_API_KEY", "")
+_OLLAMA_URL       = os.environ.get("OLLAMA_URL",   "http://localhost:11434")
+_OLLAMA_MODEL     = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
 
 
 def _get(url: str, timeout: int = 15) -> dict | list:
@@ -434,18 +448,19 @@ def fetch_fear_greed() -> dict:
 
 # ── News sentiment ─────────────────────────────────────────────────────────────
 
-def _gdelt_headlines(query: str, days: int = 7) -> list[str]:
+def _newsdata_headlines(query: str) -> list[str]:
+    if not _NEWSDATA_API_KEY:
+        return []
     params = urllib.parse.urlencode({
-        "query":      f"{query} DeFi",
-        "mode":       "artlist",
-        "maxrecords": "15",
-        "timespan":   f"{days}d",
-        "format":     "json",
+        "apikey":   _NEWSDATA_API_KEY,
+        "q":        f"{query} DeFi crypto",
+        "language": "en",
+        "category": "business,technology",
     })
     try:
-        data = _get(f"{GDELT_BASE}?{params}", timeout=10)
-        articles = data.get("articles", []) if isinstance(data, dict) else []
-        return [a.get("title", "") for a in articles if a.get("title")]
+        data = _get(f"{NEWSDATA_BASE}?{params}", timeout=15)
+        results = data.get("results", []) if isinstance(data, dict) else []
+        return [a.get("title", "") for a in results if a.get("title")]
     except Exception:
         return []
 
@@ -528,12 +543,17 @@ def fetch_news_sentiment(protocol_name: str) -> float:
     cache = get_cache()
     cached = cache.get(cache_key)
     if cached is not None:
-        return cached
+        # Guarantee headlines exist for UI rendering if returning from cache
+        if cache.get(f"headlines:{protocol_name}") is None:
+            pass # Force refresh if headlines are randomly missing
+        else:
+            return cached
 
     with _gdelt_lock:
         token     = PROTOCOLS[protocol_name]["token"]
-        headlines = _gdelt_headlines(token)
+        headlines = _newsdata_headlines(token)
         score     = _score_headlines(headlines)
+        cache.set(f"headlines:{protocol_name}", headlines, ttl=86_400)
         cache.set(cache_key, score, ttl=86_400)
         time.sleep(1.0)   # GDELT: 1s between live calls (recommended)
     return score
@@ -618,12 +638,16 @@ def load_all_data(status_cb=None) -> dict:
     if status_cb:
         status_cb(1.0, "Done")
 
+    cache = get_cache()
+    headlines = {name: cache.get(f"headlines:{name}") or [] for name in names}
+
     return {
         "tvl":            tvl_data,
         "prices":         prices,
         "px_hist":        {},   # populated lazily per-protocol in Deep Dive
         "fear_greed":     fng,
         "sentiment":      sentiments,
+        "headlines":      headlines,
         "utilization":    utilization,
         "governance":     governance,
         "market_context": market_context,
