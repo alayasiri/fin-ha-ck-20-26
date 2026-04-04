@@ -3,7 +3,7 @@ Fetches data from:
   - DeFiLlama (TVL history, free, no key)
   - CoinGecko  (prices + 30d OHLC, free tier)
   - Alternative.me (Fear & Greed Index, free, no key)
-  - GDELT      (news headlines, free, no key) + keyword sentiment scorer
+  - GDELT      (news headlines, free, no key) + Qwen LLM sentiment (Ollama, local)
 
 Free-tier rate limits enforced:
   DeFiLlama   — 1.0s between calls (no published limit; conservative)
@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Lock
 
 from config import LENDING_POOL_SLUGS, PROTOCOLS, SLUG_OVERRIDES, SNAPSHOT_SPACES
@@ -32,10 +32,12 @@ _SSL = ssl.create_default_context()
 _SSL.check_hostname = False
 _SSL.verify_mode = ssl.CERT_NONE
 
-LLAMA_BASE = "https://api.llama.fi"
-GECKO_BASE = "https://api.coingecko.com/api/v3"
-FNG_URL    = "https://api.alternative.me/fng/?limit=7"
-GDELT_BASE = "https://api.gdeltproject.org/api/v2/doc/doc"
+LLAMA_BASE    = "https://api.llama.fi"
+GECKO_BASE    = "https://api.coingecko.com/api/v3"
+FNG_URL       = "https://api.alternative.me/fng/?limit=7"
+GDELT_BASE    = "https://api.gdeltproject.org/api/v2/doc/doc"
+_OLLAMA_URL   = os.environ.get("OLLAMA_URL",   "http://localhost:11434")
+_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
 
 
 def _get(url: str, timeout: int = 15) -> dict | list:
@@ -256,6 +258,57 @@ def fetch_governance_activity() -> dict[str, int]:
     return out
 
 
+# ── BTC / ETH market context ──────────────────────────────────────────────────
+
+def fetch_market_context() -> dict:
+    """Fetch BTC and ETH price, 24h change, and 30d volatility.
+    Used as macro regime signals in the risk scorer — separate from protocol
+    token prices because BTC/ETH moves drive DeFi TVL regardless of whether
+    a protocol's own token has repriced yet."""
+    cache = get_cache()
+    cached = cache.get("market_context")
+    if cached is not None:
+        return cached
+
+    out = {"btc": {}, "eth": {}}
+    try:
+        url = (
+            f"{GECKO_BASE}/simple/price"
+            "?ids=bitcoin,ethereum&vs_currencies=usd"
+            "&include_24hr_change=true&include_24hr_vol=true"
+        )
+        raw = _get(url)
+        time.sleep(2.0)
+        for cg_id, key in [("bitcoin", "btc"), ("ethereum", "eth")]:
+            d = raw.get(cg_id, {}) if isinstance(raw, dict) else {}
+            out[key] = {
+                "price_usd":    d.get("usd", 0.0),
+                "change_24h":   d.get("usd_24h_change", 0.0),
+            }
+    except Exception:
+        pass
+
+    # Fetch 30d price history for volatility
+    for cg_id, key in [("bitcoin", "btc"), ("ethereum", "eth")]:
+        try:
+            url = (
+                f"{GECKO_BASE}/coins/{cg_id}/market_chart"
+                "?vs_currency=usd&days=30&interval=daily"
+            )
+            data   = _get(url)
+            prices = [p[1] for p in (data.get("prices", []) if isinstance(data, dict) else [])]
+            if len(prices) > 2:
+                import numpy as _np
+                rets = _np.diff(_np.log(_np.array(prices) + 1e-9))
+                out[key]["vol_30d"] = round(float(_np.std(rets)) * 100, 3)
+            time.sleep(2.0)
+        except Exception:
+            out[key]["vol_30d"] = 0.0
+
+    cache.set("market_context", out, ttl=86_400)
+    return out
+
+
 # ── Fear & Greed ──────────────────────────────────────────────────────────────
 
 def fetch_fear_greed() -> dict:
@@ -311,7 +364,53 @@ _NEG = frozenset({
 })
 
 
+def _score_headlines_llm(headlines: list[str]) -> float | None:
+    """Send headlines to a locally-running Ollama model.
+    Returns a float in [-1, 1] or None if Ollama is unavailable."""
+    if not headlines:
+        return 0.0
+
+    bullet_list = "\n".join(f"- {h}" for h in headlines)
+    prompt = (
+        "You are a DeFi risk analyst. Given the news headlines below, "
+        "return a single JSON object with one key 'score' — a float from "
+        "-1.0 (very bearish / high risk) to 1.0 (very bullish / low risk). "
+        "Consider hacks, exploits, and regulatory actions as strongly negative. "
+        "Protocol launches, audits, and TVL growth as positive. "
+        "Return ONLY the JSON, no explanation.\n\n"
+        f"Headlines:\n{bullet_list}"
+    )
+    payload = json.dumps({
+        "model":   _OLLAMA_MODEL,
+        "prompt":  prompt,
+        "stream":  False,
+        "format":  "json",
+        "options": {"temperature": 0.0},
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            f"{_OLLAMA_URL}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            resp   = json.loads(r.read())
+            parsed = json.loads(resp.get("response", "{}"))
+            score  = float(parsed.get("score", 0.0))
+            return max(-1.0, min(1.0, score))
+    except Exception:
+        return None
+
+
 def _score_headlines(headlines: list[str]) -> float:
+    """LLM scoring via Ollama with keyword fallback if Ollama is unavailable."""
+    llm_score = _score_headlines_llm(headlines)
+    if llm_score is not None:
+        return llm_score
+
+    # Keyword fallback
     if not headlines:
         return 0.0
     total = 0.0
@@ -388,13 +487,17 @@ def load_all_data(status_cb=None) -> dict:
 
     tvl_data = fetch_all_tvl(status_cb=_tvl_cb)
 
-    # Stage 2 — Prices + Fear & Greed (50% → 60%)
+    # Stage 2 — Prices + Fear & Greed + BTC/ETH macro (50% → 62%)
     if status_cb:
         status_cb(0.50, "Token prices…")
     prices = fetch_prices()
 
     if status_cb:
-        status_cb(0.55, "Fear & Greed index…")
+        status_cb(0.54, "BTC / ETH market context…")
+    market_context = fetch_market_context()
+
+    if status_cb:
+        status_cb(0.58, "Fear & Greed index…")
     fng = fetch_fear_greed()
 
     # Stage 3 — Utilization + governance (60% → 70%)
@@ -417,12 +520,13 @@ def load_all_data(status_cb=None) -> dict:
         status_cb(1.0, "Done")
 
     return {
-        "tvl":         tvl_data,
-        "prices":      prices,
-        "px_hist":     {},   # populated lazily per-protocol in Deep Dive
-        "fear_greed":  fng,
-        "sentiment":   sentiments,
-        "utilization": utilization,
-        "governance":  governance,
-        "fetched_at":  datetime.utcnow().isoformat(timespec="seconds"),
+        "tvl":            tvl_data,
+        "prices":         prices,
+        "px_hist":        {},   # populated lazily per-protocol in Deep Dive
+        "fear_greed":     fng,
+        "sentiment":      sentiments,
+        "utilization":    utilization,
+        "governance":     governance,
+        "market_context": market_context,
+        "fetched_at":     datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }

@@ -1,13 +1,23 @@
 """
-Four stress scenarios that simulate market shocks and estimate
+Five stress scenarios that simulate market shocks and estimate
 per-protocol TVL impact + risk score deterioration.
 
 Scenarios
 ─────────
+  flash_crash      — Any protocol loses N% TVL within 24–48h (governance attack,
+                     whale exit, exploit rumour, oracle failure). Contagion spreads
+                     to correlated protocols based on shared collateral/pool exposure.
+  btc_crash        — BTC price drops N%, dragging ETH via correlation + triggering
+                     market-wide fear and liquidation cascades in collateral-heavy protocols
   eth_crash        — ETH price drops N%, triggers liquidation cascades
   tvl_exodus       — Mass withdrawal of M% of TVL across DeFi
   stablecoin_depeg — Major stablecoin loses P% of its peg
   exploit          — Simulated smart contract drain on a target protocol
+
+Non-linear cascade: shocks above 20% trigger an amplification multiplier
+that models the cliff-effect of mass liquidations hitting simultaneously.
+Flash crash uses a speed multiplier on top of cascade — same loss over 24h
+is far more dangerous than over 30 days because governance cannot respond.
 """
 from config import (
     ETH_COLLATERAL_HEAVY,
@@ -16,7 +26,40 @@ from config import (
     THRESHOLDS,
 )
 
+# BTC→ETH price correlation (30-day rolling average, historically ~0.82–0.88)
+_BTC_ETH_CORRELATION = 0.85
+
+# Protocols with direct or indirect BTC collateral exposure
+_BTC_EXPOSED = {
+    "Aave", "Compound", "Sky (MakerDAO)", "Lido",
+    "Instadapp", "GMX", "Synthetix",
+}
+
 SCENARIOS = {
+    "flash_crash": {
+        "label":        "Protocol Flash Crash",
+        "description":  (
+            "Any protocol drops N% TVL within 24–48 hours. Causes include governance attacks, "
+            "whale exits, oracle failures, or exploit rumours. Unlike a slow drawdown, speed "
+            "prevents governance from responding — contagion hits correlated protocols before "
+            "anyone can react. Select the target protocol and set the TVL drop magnitude."
+        ),
+        "param_label":  "TVL drop (%)",
+        "param_range":  (10, 95),
+        "param_default": 40,
+    },
+    "btc_crash": {
+        "label":        "BTC Market Crash",
+        "description":  (
+            "Simulates a sharp BTC price drop — the most common macro shock in crypto. "
+            "BTC and ETH are highly correlated (~0.85), so a BTC crash propagates to ETH "
+            "collateral and triggers market-wide fear, TVL outflows, and liquidation cascades "
+            "in lending protocols. This is the scenario closest to a real overnight crash."
+        ),
+        "param_label":  "BTC price drop (%)",
+        "param_range":  (10, 70),
+        "param_default": 30,
+    },
     "eth_crash": {
         "label":       "ETH Price Crash",
         "description": "Simulates a sharp ETH price drawdown triggering liquidation cascades "
@@ -61,39 +104,72 @@ _CONTAGION = {
 }
 
 
+def _cascade_multiplier(param: float) -> float:
+    """Non-linear amplification above 20% shock.
+    Below 20%: orderly deleveraging. Above 20%: liquidations cluster,
+    utilization spikes, and protocols approach insolvency cliffs simultaneously.
+    Based on empirical TVL drawdowns during March 2020 and May 2021 crashes."""
+    if param <= 20:
+        return 1.0
+    # Each 10% above the 20% threshold adds ~15% more impact
+    extra = (param - 20) / 10
+    return round(1.0 + extra * 0.15, 3)
+
+
 def _tvl_impact(name: str, scenario: str, param: float) -> float:
     """Estimated % TVL change for a protocol under a scenario."""
-    meta = PROTOCOLS[name]
+    meta    = PROTOCOLS[name]
+    cascade = _cascade_multiplier(param)
+
+    if scenario == "flash_crash":
+        # Handled entirely in run_scenario (target-specific, like exploit)
+        return 0.0
+
+    if scenario == "btc_crash":
+        # BTC drops param% → ETH drops param * correlation %
+        eth_equiv = param * _BTC_ETH_CORRELATION
+
+        # Market-wide fear drives universal outflows regardless of BTC exposure
+        base_fear = param * 0.12   # even non-ETH protocols see withdrawals
+
+        if name in _BTC_EXPOSED or name in ETH_COLLATERAL_HEAVY:
+            # Direct collateral pressure from ETH re-pricing
+            base = eth_equiv * 0.45
+            if meta["category"] == "Lending":
+                base *= 1.3   # lending liquidations accelerate faster
+        elif meta["eth_exposure"]:
+            base = eth_equiv * 0.20
+        else:
+            base = base_fear
+
+        return -min((base + base_fear) * cascade, 90)
 
     if scenario == "eth_crash":
         if name in ETH_COLLATERAL_HEAVY:
-            # Heavy ETH exposure → direct liquidation pressure
             base = param * 0.45
         elif meta["eth_exposure"]:
             base = param * 0.20
         else:
             base = param * 0.05
-        # Lending platforms liquidate faster than DEXes
         multiplier = 1.3 if meta["category"] == "Lending" else 1.0
-        return -min(base * multiplier, 90)
+        return -min(base * multiplier * cascade, 90)
 
     elif scenario == "tvl_exodus":
-        # Everyone bleeds, but single-chain and lower-liquidity protocols bleed more
         base = param
         if meta["chains_count"] == 1:
             base *= 1.25
         if meta["category"] in ("Yield Aggregator", "CDP"):
             base *= 1.15
-        return -min(base, 95)
+        return -min(base * cascade, 95)
 
     elif scenario == "stablecoin_depeg":
         if name in STABLECOIN_EXPOSED:
-            base = param * 2.2   # pool imbalances amplify depeg
+            base = param * 2.2
         elif meta.get("eth_exposure"):
             base = param * 0.6
         else:
             base = param * 0.15
-        return -min(base, 85)
+        return -min(base * cascade, 85)
 
     elif scenario == "exploit":
         # This is computed at call time (target-specific), default to 0
@@ -103,17 +179,35 @@ def _tvl_impact(name: str, scenario: str, param: float) -> float:
 
 
 def _risk_delta(name: str, tvl_impact_pct: float, scenario: str) -> float:
-    """Approximate increase in composite risk score from a TVL shock."""
-    meta = PROTOCOLS[name]
-    base_delta = abs(tvl_impact_pct) * 0.6
+    """Approximate increase in composite risk score from a TVL shock.
 
-    # Protocols with already-elevated SC risk amplify impact
+    Non-linear: small shocks cause orderly repricing; large shocks trigger
+    reflexive selling, oracle failures, and governance paralysis — all of
+    which the linear model underestimates."""
+    meta       = PROTOCOLS[name]
+    abs_impact = abs(tvl_impact_pct)
+
+    # Non-linear base: quadratic above 20% impact
+    if abs_impact <= 20:
+        base_delta = abs_impact * 0.6
+    else:
+        base_delta = 20 * 0.6 + (abs_impact - 20) ** 1.4 * 0.08
+
+    # Protocols with prior exploits are more vulnerable during stress
     if meta["exploit_severity"] == 2:
-        base_delta *= 1.3
+        base_delta *= 1.35
     if not meta["has_timelock"]:
+        base_delta *= 1.20
+
+    # Flash crash and BTC crash: governance cannot respond overnight.
+    # Flash crash gets a higher speed premium — same loss in 24h vs 30 days
+    # means no orderly unwinding, no emergency DAO vote, no circuit breaker.
+    if scenario == "flash_crash":
+        base_delta *= 1.40
+    elif scenario == "btc_crash":
         base_delta *= 1.15
 
-    return round(min(base_delta, 50), 2)
+    return round(min(base_delta, 55), 2)
 
 
 def run_scenario(
@@ -129,14 +223,18 @@ def run_scenario(
     for name, score_data in current_scores.items():
         current_composite = score_data["composite"]
 
-        if scenario_id == "exploit":
+        if scenario_id in ("exploit", "flash_crash"):
             if name == target_protocol:
                 impact_pct = -param
             elif target_protocol and name in _CONTAGION.get(target_protocol, []):
-                impact_pct = -(param * 0.25)
+                # Flash crash contagion is larger than a quiet exploit —
+                # speed of the crash triggers panic exits in correlated pools
+                spread = 0.35 if scenario_id == "flash_crash" else 0.25
+                impact_pct = -(param * spread)
                 contagion_victims.add(name)
             else:
-                impact_pct = 0.0
+                # Flash crash still causes small market-wide fear outflows
+                impact_pct = -(param * 0.05) if scenario_id == "flash_crash" else 0.0
         else:
             impact_pct = _tvl_impact(name, scenario_id, param)
 

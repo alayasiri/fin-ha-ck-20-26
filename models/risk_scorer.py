@@ -37,6 +37,8 @@ def _liquidity_score(tvl_series: list[dict], utilization: float | None = None) -
         ref = vals[-(lookback + 1)]
         return (current - ref) / ref if ref > 0 else 0.0
 
+    ch1  = pct_change(1)
+    ch3  = pct_change(3)
     ch7  = pct_change(7)
     ch30 = pct_change(30)
 
@@ -45,26 +47,42 @@ def _liquidity_score(tvl_series: list[dict], utilization: float | None = None) -
     s_7d       = min(max(-ch7  * 150, 0), 30)
     s_30d      = min(max(-ch30 *  90, 0), 30)
 
+    # Velocity signals: sudden TVL drops in 1-3 days score much higher than
+    # the same drawdown spread over weeks. A 20% drop in 24h signals panic
+    # exits or an active exploit — not routine rebalancing.
+    s_vel_1d = min(max(-ch1 * 400, 0), 35)   # 10% in 1d → 40 pts, cap 35
+    s_vel_3d = min(max(-ch3 * 200, 0), 25)   # 10% in 3d → 20 pts, cap 25
+
     # Utilization penalty for lending protocols: >80% util is a risk signal
     s_util = 0.0
     if utilization is not None and utilization > 0.80:
-        s_util = min((utilization - 0.80) * 100, 20)   # up to 20 pts over 80%
-    score  = s_drawdown + s_7d + s_30d + s_util
+        s_util = min((utilization - 0.80) * 100, 20)
+
+    score = s_drawdown + s_7d + s_30d + s_vel_1d + s_vel_3d + s_util
 
     meta = {
         "drawdown_pct": round(drawdown * 100, 2),
+        "change_1d":    round(ch1  * 100, 2),
+        "change_3d":    round(ch3  * 100, 2),
         "change_7d":    round(ch7  * 100, 2),
         "change_30d":   round(ch30 * 100, 2),
-        "current_tvl":   current,
-        "peak_tvl":      peak,
-        "utilization":   round(utilization * 100, 1) if utilization is not None else None,
+        "current_tvl":  current,
+        "peak_tvl":     peak,
+        "utilization":  round(utilization * 100, 1) if utilization is not None else None,
     }
     return round(min(score, 100), 2), meta
 
 
-def _market_score(price_history: list[float]) -> tuple[float, dict]:
+def _market_score(
+    price_history: list[float],
+    btc_24h_change: float = 0.0,
+    btc_vol_30d: float = 0.0,
+) -> tuple[float, dict]:
     if len(price_history) < 5:
-        return 45.0, {"volatility_30d": 0, "price_return_30d": 0}
+        # Even without protocol price history, BTC macro context still matters
+        btc_regime = min(abs(btc_24h_change) * 1.2, 30)
+        return round(45.0 + btc_regime, 2), {"volatility_30d": 0, "price_return_30d": 0,
+                                              "btc_24h_change": btc_24h_change}
 
     prices = np.array(price_history, dtype=float)
     rets   = np.diff(np.log(prices + 1e-9))
@@ -75,10 +93,28 @@ def _market_score(price_history: list[float]) -> tuple[float, dict]:
     p30_ret   = float((prices[-1] - prices[0]) / prices[0]) if prices[0] > 0 else 0.0
     ret_score = float(min(max(-p30_ret * 40, 0), 20))
 
-    score = vol_score + ret_score
+    # Velocity signal: rate of change over last 3 days vs last 30 days.
+    # A crash that happens in 3 days is far more dangerous than the same
+    # drawdown spread over a month — sudden moves indicate panic, not rebalancing.
+    if len(prices) >= 4:
+        vel_3d  = float((prices[-1] - prices[-4]) / prices[-4]) if prices[-4] > 0 else 0.0
+        vel_score = float(min(max(-vel_3d * 200, 0), 20))
+    else:
+        vel_3d    = 0.0
+        vel_score = 0.0
+
+    # BTC macro regime: a large BTC 24h move signals market-wide stress even
+    # before the protocol's own TVL or token price has fully repriced.
+    btc_regime_score = float(min(abs(btc_24h_change) * 0.8, 15))
+    if btc_24h_change < -15:
+        btc_regime_score = float(min(abs(btc_24h_change) * 1.4, 20))
+
+    score = vol_score + ret_score + vel_score + btc_regime_score
     return round(min(score, 100), 2), {
         "volatility_30d":   round(daily_vol * 100, 3),
         "price_return_30d": round(p30_ret * 100, 2),
+        "velocity_3d":      round(vel_3d * 100, 2),
+        "btc_24h_change":   round(btc_24h_change, 2),
     }
 
 
@@ -167,6 +203,10 @@ def _rationale(name: str, breakdown: dict, anomaly_count: int) -> str:
         flags.append("concentrated token distribution")
     if breakdown["liquidity"] > 40:
         flags.append("significant TVL decline from peak")
+    # Velocity check on raw score components isn't available here, but a very
+    # high liquidity score with small drawdown implies it was driven by velocity
+    if breakdown["liquidity"] > 55 and breakdown.get("drawdown_pct", 100) < 30:
+        flags.append("rapid TVL outflow detected (velocity signal)")
     if breakdown["market"] > 55:
         flags.append("elevated token price volatility")
     if anomaly_count > 0:
@@ -188,11 +228,13 @@ def score_protocol(
     anomaly_count:  int = 0,
     utilization:    float | None = None,
     proposal_count: int = 0,
+    btc_24h_change: float = 0.0,
+    btc_vol_30d:    float = 0.0,
 ) -> dict:
     meta = PROTOCOLS[name]
 
     liq_score,  liq_meta  = _liquidity_score(tvl_series, utilization)
-    mkt_score,  mkt_meta  = _market_score(price_history)
+    mkt_score,  mkt_meta  = _market_score(price_history, btc_24h_change, btc_vol_30d)
     sc_score              = _sc_score(meta)
     gov_score             = _governance_score(meta, proposal_count)
     sent_score            = _sentiment_score(fng_value, news_sentiment)
@@ -228,12 +270,16 @@ def score_protocol(
         "current_tvl":     liq_meta.get("current_tvl", 0),
         "peak_tvl":        liq_meta.get("peak_tvl", 0),
         "drawdown_pct":    liq_meta.get("drawdown_pct", 0),
+        "change_1d":       liq_meta.get("change_1d", 0),
+        "change_3d":       liq_meta.get("change_3d", 0),
         "change_7d":       liq_meta.get("change_7d", 0),
         "change_30d":      liq_meta.get("change_30d", 0),
         "utilization":     liq_meta.get("utilization"),
         "proposal_count":  proposal_count,
         "volatility_30d":  mkt_meta.get("volatility_30d", 0),
         "price_return_30d":mkt_meta.get("price_return_30d", 0),
+        "velocity_3d":     mkt_meta.get("velocity_3d", 0),
+        "btc_24h_change":  mkt_meta.get("btc_24h_change", 0),
     }
 
 
@@ -242,6 +288,9 @@ def score_all(data: dict, anomaly_counts: dict | None = None) -> dict[str, dict]
     anomaly_counts = anomaly_counts or {}
     utilization    = data.get("utilization", {})
     governance     = data.get("governance", {})
+    btc            = data.get("market_context", {}).get("btc", {})
+    btc_24h_change = btc.get("change_24h", 0.0)
+    btc_vol_30d    = btc.get("vol_30d", 0.0)
     results = {}
     for name in PROTOCOLS:
         results[name] = score_protocol(
@@ -253,5 +302,7 @@ def score_all(data: dict, anomaly_counts: dict | None = None) -> dict[str, dict]
             anomaly_count  = anomaly_counts.get(name, 0),
             utilization    = utilization.get(name),
             proposal_count = governance.get(name, 0),
+            btc_24h_change = btc_24h_change,
+            btc_vol_30d    = btc_vol_30d,
         )
     return results

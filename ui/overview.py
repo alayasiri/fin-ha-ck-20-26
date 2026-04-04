@@ -22,24 +22,46 @@ def _band_label(score: float) -> str:
 
 
 def _alert_banner(scores: dict, anomalies: dict):
-    exits   = [n for n, v in scores.items() if v["signal"] == "EXIT"]
-    reduces = [n for n, v in scores.items() if v["signal"] == "REDUCE"]
+    exits     = [n for n, v in scores.items() if v["signal"] == "EXIT"]
+    reduces   = [n for n, v in scores.items() if v["signal"] == "REDUCE"]
     high_anom = [n for n, evs in anomalies.items()
                  if any(e["severity"] == "high" for e in evs)]
 
+    alerts = []
     if exits:
-        st.error(
-            f"**EXIT signal active** — {', '.join(exits)}. "
-            "Risk scores have crossed the high-risk threshold. Review positions immediately."
-        )
+        alerts.append((
+            "#f85149", "#2a1015",
+            "EXIT",
+            f"{', '.join(exits)} — risk scores exceed safe threshold",
+        ))
     if reduces:
-        st.warning(
-            f"**REDUCE signal** — {', '.join(reduces)}. "
-            "Elevated risk detected; consider trimming exposure."
-        )
+        alerts.append((
+            "#e3b341", "#251e0a",
+            "REDUCE",
+            f"{', '.join(reduces)} — elevated risk, consider trimming",
+        ))
     if high_anom:
-        names = ", ".join(high_anom)
-        st.warning(f"**High-severity anomalies** detected on: {names}.")
+        alerts.append((
+            "#f0883e", "#251505",
+            "ANOMALY",
+            f"High-severity on-chain activity: {', '.join(high_anom)}",
+        ))
+
+    if not alerts:
+        return
+
+    rows = ""
+    for color, bg, tag, msg in alerts:
+        rows += (
+            f"<div style='display:flex;align-items:center;gap:12px;"
+            f"background:{bg};border-left:3px solid {color};"
+            f"padding:9px 14px;border-radius:0 6px 6px 0;margin-bottom:6px'>"
+            f"<span style='color:{color};font-size:11px;font-weight:700;"
+            f"letter-spacing:.06em;white-space:nowrap'>{tag}</span>"
+            f"<span style='color:#e6edf3;font-size:13px'>{msg}</span>"
+            f"</div>"
+        )
+    st.markdown(rows, unsafe_allow_html=True)
 
 
 def render(scores: dict, anomalies: dict, fear_greed: dict):
@@ -190,7 +212,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
 
     col_sort, _ = st.columns([2, 5])
     sort_key = col_sort.selectbox(
-        "Sort by", ["Risk Score", "TVL", "7d TVL Change", "Signal"],
+        "Sort by", ["Risk Score", "TVL", "1d TVL Change", "7d TVL Change", "Signal"],
         label_visibility="collapsed",
         help="Change the column used to sort the table",
     )
@@ -203,6 +225,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
             "Risk Score":    data["composite"],
             "Band":          _band_label(data["composite"]),
             "TVL":           data.get("current_tvl", 0),
+            "1d Change":     data.get("change_1d", 0),
             "7d Change":     data.get("change_7d", 0),
             "Drawdown":      data.get("drawdown_pct", 0),
             "Signal":        data.get("signal", "—"),
@@ -212,6 +235,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
     key_map = {
         "Risk Score":    ("Risk Score", True),
         "TVL":           ("TVL", True),
+        "1d TVL Change": ("1d Change", False),
         "7d TVL Change": ("7d Change", False),
         "Signal":        ("Signal", True),
     }
@@ -242,7 +266,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
     <tr>
       <th>#</th><th>Protocol</th><th>Category</th>
       <th>Risk Score</th><th>Band</th>
-      <th>TVL</th><th>7d Δ TVL</th><th>Drawdown</th>
+      <th>TVL</th><th>1d Δ</th><th>7d Δ</th><th>Drawdown</th>
       <th>Signal</th><th>Anomalies</th>
     </tr>
         """)
@@ -255,8 +279,13 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
         bar_color = _risk_color(score)
         bar_pct   = int(score)
         tvl_str   = f"${r['TVL']/1e9:.2f}B" if r["TVL"] >= 1e9 else f"${r['TVL']/1e6:.0f}M"
-        ch7_str   = f"{r['7d Change']:+.1f}%"
-        ch7_color = "#3fb950" if r["7d Change"] > 0 else "#f85149"
+        ch1       = r["1d Change"]
+        ch7       = r["7d Change"]
+        ch1_str   = f"{ch1:+.1f}%"
+        ch7_str   = f"{ch7:+.1f}%"
+        # 1d drop below -5% gets a bright red highlight to flag flash crashes
+        ch1_color = "#f85149" if ch1 < -5 else ("#e3b341" if ch1 < 0 else "#3fb950")
+        ch7_color = "#f85149" if ch7 < 0 else "#3fb950"
         dd_str    = f"{r['Drawdown']:.1f}%"
         band      = r["Band"]
         sig       = r["Signal"]
@@ -274,6 +303,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
           </td>
           <td><span class="badge {band_class.get(band,'')}">{band}</span></td>
           <td>{tvl_str}</td>
+          <td style="color:{ch1_color};font-weight:{'700' if ch1 < -5 else '400'}">{ch1_str}</td>
           <td style="color:{ch7_color}">{ch7_str}</td>
           <td style="color:#8b949e">{dd_str}</td>
           <td class="{sig_class.get(sig,'')}">{sig}</td>

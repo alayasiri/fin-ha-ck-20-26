@@ -50,9 +50,10 @@ def render(scores: dict):
 
     target_protocol = None
     with col_target:
-        if scenario_id == "exploit":
+        if scenario_id in ("exploit", "flash_crash"):
+            label = "Target Protocol"
             target_protocol = st.selectbox(
-                "Target Protocol",
+                label,
                 list(scores.keys()),
                 index=0,
             )
