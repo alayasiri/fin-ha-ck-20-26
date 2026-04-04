@@ -301,7 +301,7 @@ def score_all(data: dict, anomaly_counts: dict | None = None) -> dict[str, dict]
             news_sentiment = data["sentiment"].get(name, 0.0),
             anomaly_count  = anomaly_counts.get(name, 0),
             utilization    = utilization.get(name),
-            proposal_count = governance.get(name, 0),
+            proposal_count = governance.get(name, {}).get("proposal_count", 0),
             btc_24h_change = btc_24h_change,
             btc_vol_30d    = btc_vol_30d,
         )

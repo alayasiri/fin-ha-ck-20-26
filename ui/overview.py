@@ -210,7 +210,7 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
                 st.session_state.active_page = "Protocol Deep Dive"
                 st.rerun()
 
-    col_sort, _ = st.columns([2, 5])
+    col_sort, col_export, _ = st.columns([2, 2, 4])
     sort_key = col_sort.selectbox(
         "Sort by", ["Risk Score", "TVL", "1d TVL Change", "7d TVL Change", "Signal"],
         label_visibility="collapsed",
@@ -241,6 +241,15 @@ def render(scores: dict, anomalies: dict, fear_greed: dict):
     }
     sort_col, reverse = key_map[sort_key]
     rows.sort(key=lambda r: r[sort_col], reverse=reverse)
+
+    import io
+    import csv
+    csv_buf = io.StringIO()
+    writer = csv.DictWriter(csv_buf, fieldnames=rows[0].keys() if rows else [])
+    if rows:
+        writer.writeheader()
+        writer.writerows(rows)
+    col_export.download_button("Export CSV", data=csv_buf.getvalue(), file_name="risk_report.csv", mime="text/csv", use_container_width=True)
 
     # Custom HTML table for visual richness
     table_html = dedent("""

@@ -220,9 +220,68 @@ def fetch_utilization_rates() -> dict[str, float]:
 _SNAPSHOT_GQL = "https://hub.snapshot.org/graphql"
 
 
-def fetch_governance_activity() -> dict[str, int]:
-    """Returns number of governance proposals in the last 30 days per protocol."""
-    cache_key = "governance_activity"
+def _fetch_whale_dominance(proposal_id: str, scores_total: float) -> float:
+    """Calculates Nakamoto Coefficient equivalent for a proposal.
+    Returns the percent of scores_total held by the top 5 voters."""
+    if scores_total <= 0:
+        return 0.0
+    query = (
+        '{"query":"{ votes(first:5, where:{proposal:\\\"'
+        + proposal_id
+        + '\\\"}, orderBy:\\\"vp\\\", orderDirection:desc) { vp } }"}'
+    )
+    req = urllib.request.Request(
+        _SNAPSHOT_GQL,
+        data=query.encode(),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL) as r:
+            data = json.loads(r.read())
+        votes_data = data.get("data", {}).get("votes", [])
+        top_vp = sum(v.get("vp", 0.0) for v in votes_data)
+        return top_vp / scores_total
+    except Exception:
+        return 0.0
+
+
+def _classify_proposal_llm(title: str, body: str) -> str:
+    """Uses Ollama to categorize a proposal into Treasury, Technical, or Social."""
+    text = f"{title}\n\n{body}"[:1000]
+    prompt = (
+        "You are an expert crypto governance analyst. Categorize the following proposal "
+        "into exactly ONE of these three categories: 'Treasury', 'Technical', or 'Social'. "
+        "Return ONLY the category word as a JSON object with a 'category' key. Nothing else.\n\n"
+        f"Proposal:\n{text}"
+    )
+    payload = json.dumps({
+        "model":   _OLLAMA_MODEL,
+        "prompt":  prompt,
+        "stream":  False,
+        "format":  "json",
+        "options": {"temperature": 0.0},
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f"{_OLLAMA_URL}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp   = json.loads(r.read())
+            parsed = json.loads(resp.get("response", "{}"))
+            cat = parsed.get("category", "")
+            if cat in ("Treasury", "Technical", "Social"):
+                return cat
+            return "Mixed"
+    except Exception:
+        return "Unknown"
+
+
+def fetch_governance_activity() -> dict[str, dict]:
+    """Returns deep governance metrics in the last 30 days per protocol."""
+    cache_key = "governance_activity_v2"
     cache = get_cache()
     cached = cache.get(cache_key)
     if cached is not None:
@@ -234,11 +293,11 @@ def fetch_governance_activity() -> dict[str, int]:
 
     for name, space in SNAPSHOT_SPACES.items():
         query = (
-            '{"query":"{ proposals(first:50, where:{space:\\\"'
+            '{"query":"{ proposals(first:20, where:{space:\\\"'
             + space
             + '\\\",created_gte:'
             + str(cutoff)
-            + '}) { id } }"}'
+            + ',state:\\\"closed\\\"}) { id title body votes scores_total state } }"}'
         )
         req = urllib.request.Request(
             _SNAPSHOT_GQL,
@@ -249,9 +308,49 @@ def fetch_governance_activity() -> dict[str, int]:
             with urllib.request.urlopen(req, timeout=10, context=_SSL) as r:
                 data = json.loads(r.read())
             proposals = data.get("data", {}).get("proposals", [])
-            out[name] = len(proposals)
+            
+            total_votes = 0
+            total_proposals = len(proposals)
+            sum_whale_dom = 0.0
+            
+            for p in proposals:
+                votes_count = p.get("votes") or 0
+                total_votes += votes_count
+                stotal = p.get("scores_total") or 0.0
+                pid = p.get("id", "")
+                
+                # Fetch Whale Dominance for proposals combining power
+                w_dom = _fetch_whale_dominance(pid, stotal)
+                sum_whale_dom += w_dom
+                
+                # Semantic Classification (using Ollama inline)
+                _cat = _classify_proposal_llm(p.get("title", ""), p.get("body", ""))
+                
+                _time.sleep(0.2) # Prevent rate limiting on subqueries
+                
+            avg_participation = total_votes / total_proposals if total_proposals > 0 else 0.0
+            avg_whale_dom = sum_whale_dom / total_proposals if total_proposals > 0 else 0.0
+            
+            if avg_participation < 100 or avg_whale_dom > 0.8:
+                risk_level = "HIGH"
+            elif avg_participation < 500 or avg_whale_dom > 0.5:
+                risk_level = "MEDIUM"
+            else:
+                risk_level = "LOW"
+
+            out[name] = {
+                "proposal_count": total_proposals,
+                "avg_participation": avg_participation,
+                "avg_whale_dominance": avg_whale_dom,
+                "risk_level": risk_level
+            }
         except Exception:
-            out[name] = 0
+            out[name] = {
+                "proposal_count": 0,
+                "avg_participation": 0.0,
+                "avg_whale_dominance": 0.0,
+                "risk_level": "LOW"
+            }
         time.sleep(0.5)
 
     cache.set(cache_key, out, ttl=86_400)

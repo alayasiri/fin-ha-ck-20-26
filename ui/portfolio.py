@@ -1,3 +1,6 @@
+import json
+import os
+import urllib.request
 import plotly.graph_objects as go
 import numpy as np
 import streamlit as st
@@ -11,6 +14,36 @@ _SIG_META = {
     "REDUCE":   {"color": "#e3b341", "icon": "▼", "desc": "Elevated risk, trim position size"},
     "EXIT":     {"color": "#f85149", "icon": "✕", "desc": "Risk threshold exceeded, exit or hedge"},
 }
+
+_OLLAMA_URL   = os.environ.get("OLLAMA_URL",   "http://localhost:11434")
+_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
+
+def _generate_executive_summary(scores: dict) -> str:
+    high_risk = [name for name, d in scores.items() if d.get("signal") in ("EXIT", "REDUCE")]
+    if not high_risk:
+        prompt = "You are a professional financial risk analyst reporting to a portfolio manager. Provide a concise, two-sentence executive summary stating that all tracked protocols are currently stable and outside the high-risk zone. Avoid filler words, emojis, and exaggerated language."
+    else:
+        prompt = f"You are a professional financial risk analyst reporting to a portfolio manager. Provide a concise, two-sentence executive summary advising caution regarding the following specific assets flagged for immediate risk reduction or exit: {', '.join(high_risk)}. Avoid filler words, emojis, and exaggerated language."
+
+    payload = json.dumps({
+        "model":   _OLLAMA_MODEL,
+        "prompt":  prompt,
+        "stream":  False,
+        "options": {"temperature": 0.2},
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f"{_OLLAMA_URL}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            resp = json.loads(r.read())
+            return resp.get("response", "AI Summary unavailable at the moment.")
+    except Exception:
+        return "AI Summary engine is currently unreachable. Check local Ollama connection."
+
 
 
 def _max_allocation(score: float) -> float:
@@ -102,10 +135,12 @@ def _portfolio_risk_calculator(scores: dict):
         if weights[n] * 100 > _max_allocation(scores[n]["composite"])
     ]
     if over_limit:
-        st.warning(
-            f"**Allocation exceeds suggested cap** for: {', '.join(over_limit)}. "
-            "Consider rebalancing to stay within risk-adjusted position limits."
-        )
+        st.warning("**Allocation exceeds suggested cap.** Consider rebalancing to stay within risk-adjusted position limits.")
+        for n in over_limit:
+            max_pct = _max_allocation(scores[n]["composite"])
+            max_usd = total * (max_pct / 100.0)
+            over_usd = holdings[n] - max_usd
+            st.markdown(f"&nbsp;&nbsp;• **{n}**: Current {weights[n]*100:.1f}% (${holdings[n]:,.0f}) | Max {max_pct:.0f}% (${max_usd:,.0f}) ➔ **Reduce holding by ${over_usd:,.0f}**")
 
     st.divider()
 
@@ -116,6 +151,11 @@ def render(scores: dict, anomalies: dict):
         "Signal-based position guidance derived from the composite risk score, "
         "on-chain anomaly count, and sentiment overlay."
     )
+
+    if st.button("Generate Executive Summary", help="Generate an automated risk overview"):
+        with st.spinner("Generating summary..."):
+            summary = _generate_executive_summary(scores)
+            st.info(f"**Executive Brief:**\n\n{summary}")
 
     _portfolio_risk_calculator(scores)
 
