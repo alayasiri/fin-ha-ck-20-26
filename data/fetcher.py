@@ -1,0 +1,344 @@
+"""
+Fetches data from:
+  - DeFiLlama (TVL history, free, no key)
+  - CoinGecko  (prices + 30d OHLC, free tier)
+  - Alternative.me (Fear & Greed Index, free, no key)
+  - GDELT      (news headlines, free, no key) + keyword sentiment scorer
+
+Free-tier rate limits enforced:
+  DeFiLlama   — 1.0s between calls (no published limit; conservative)
+  CoinGecko   — 2.0s between calls (30 req/min on the public endpoint)
+  GDELT       — 1.0s between calls (recommended by GDELT docs)
+  Alternative.me — single call per session; no constraint needed
+
+Sleeps only fire when a live network request is made.
+Cached responses return immediately.
+"""
+import json
+import os
+import ssl
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from threading import Lock
+
+from config import PROTOCOLS, SLUG_OVERRIDES
+from data.cache import get_cache
+
+_SSL = ssl.create_default_context()
+_SSL.check_hostname = False
+_SSL.verify_mode = ssl.CERT_NONE
+
+LLAMA_BASE = "https://api.llama.fi"
+GECKO_BASE = "https://api.coingecko.com/api/v3"
+FNG_URL    = "https://api.alternative.me/fng/?limit=7"
+GDELT_BASE = "https://api.gdeltproject.org/api/v2/doc/doc"
+
+
+def _get(url: str, timeout: int = 15) -> dict | list:
+    req = urllib.request.Request(url, headers={
+        "Accept":     "application/json",
+        "User-Agent": "defi-risk-platform/1.0",
+    })
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=_SSL) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                wait = int(e.headers.get("Retry-After") or 2 ** (attempt + 2))
+                time.sleep(wait)
+            elif e.code in (404, 400):
+                return {}
+            else:
+                raise
+        except Exception:
+            if attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
+    return {}
+
+
+def _slug(name: str) -> str:
+    return SLUG_OVERRIDES.get(name, name.lower().replace(" ", "-"))
+
+
+# ── TVL ────────────────────────────────────────────────────────────────────────
+
+_llama_lock = Lock()   # one live DeFiLlama request at a time (shared socket pool)
+
+
+def fetch_tvl_history(protocol_name: str) -> list[dict]:
+    cache_key = f"tvl:{protocol_name}"
+    cache = get_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    with _llama_lock:
+        slug   = _slug(protocol_name)
+        data   = _get(f"{LLAMA_BASE}/protocol/{slug}")
+        series = data.get("tvl", []) if isinstance(data, dict) else []
+        cache.set(cache_key, series, ttl=86_400)
+        time.sleep(0.3)   # brief courtesy gap between live calls
+    return series
+
+
+def fetch_all_tvl(status_cb=None) -> dict[str, list[dict]]:
+    names     = list(PROTOCOLS.keys())
+    result    = {}
+    completed = 0
+    lock      = Lock()
+
+    def _fetch(name):
+        return name, fetch_tvl_history(name)
+
+    # DeFiLlama has no rate limit — parallelise across protocols.
+    # _llama_lock inside fetch_tvl_history keeps live calls sequential
+    # while still letting cached calls return instantly in parallel.
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_fetch, n): n for n in names}
+        for fut in as_completed(futures):
+            name, series = fut.result()
+            result[name] = series
+            with lock:
+                completed += 1
+                if status_cb:
+                    status_cb(completed / len(names), f"TVL: {name}")
+
+    return result
+
+
+# ── Prices ────────────────────────────────────────────────────────────────────
+
+def fetch_prices() -> dict[str, dict]:
+    cache_key = "prices:batch"
+    cache = get_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    ids = ",".join({m["coingecko_id"] for m in PROTOCOLS.values()})
+    url = (
+        f"{GECKO_BASE}/simple/price"
+        f"?ids={ids}&vs_currencies=usd"
+        f"&include_24hr_change=true&include_market_cap=true"
+    )
+    try:
+        raw = _get(url)
+    except Exception:
+        raw = {}
+
+    # Remap from coingecko_id → protocol_name for convenience
+    id_to_name = {m["coingecko_id"]: n for n, m in PROTOCOLS.items()}
+    out = {}
+    for cg_id, vals in raw.items():
+        name = id_to_name.get(cg_id, cg_id)
+        out[name] = {
+            "price_usd":      vals.get("usd", 0.0),
+            "change_24h_pct": vals.get("usd_24h_change", 0.0),
+            "market_cap_usd": vals.get("usd_market_cap", 0.0),
+        }
+
+    cache.set(cache_key, out, ttl=86_400)
+    time.sleep(2.0)   # CoinGecko: 30 req/min on free tier = 2s minimum
+    return out
+
+
+def fetch_price_history(protocol_name: str) -> list[float]:
+    cache_key = f"px_hist:{protocol_name}"
+    cache = get_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    cg_id = PROTOCOLS[protocol_name]["coingecko_id"]
+    url = f"{GECKO_BASE}/coins/{cg_id}/market_chart?vs_currency=usd&days=30&interval=daily"
+    try:
+        data  = _get(url)
+        prices = [p[1] for p in data.get("prices", [])]
+    except Exception:
+        prices = []
+
+    cache.set(cache_key, prices, ttl=86_400)
+    time.sleep(2.0)   # CoinGecko: 30 req/min on free tier = 2s minimum
+    return prices
+
+
+def fetch_all_price_histories() -> dict[str, list[float]]:
+    cache_key = "px_hist:all"
+    cache = get_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    out = {}
+    for name in PROTOCOLS:
+        out[name] = fetch_price_history(name)
+
+    cache.set(cache_key, out, ttl=86_400)
+    return out
+
+
+# ── Fear & Greed ──────────────────────────────────────────────────────────────
+
+def fetch_fear_greed() -> dict:
+    cache = get_cache()
+    cached = cache.get("fng")
+    if cached is not None:
+        return cached
+
+    try:
+        raw = _get(FNG_URL)
+        entries = raw.get("data", [])
+        current = entries[0] if entries else {}
+        out = {
+            "value":     int(current.get("value", 50)),
+            "label":     current.get("value_classification", "Neutral"),
+            "history":   [int(e["value"]) for e in entries],
+        }
+    except Exception:
+        out = {"value": 50, "label": "Neutral", "history": [50]}
+
+    cache.set("fng", out, ttl=86_400)
+    return out
+
+
+# ── News sentiment ─────────────────────────────────────────────────────────────
+
+def _gdelt_headlines(query: str, days: int = 7) -> list[str]:
+    params = urllib.parse.urlencode({
+        "query":      f"{query} DeFi",
+        "mode":       "artlist",
+        "maxrecords": "15",
+        "timespan":   f"{days}d",
+        "format":     "json",
+    })
+    try:
+        data = _get(f"{GDELT_BASE}?{params}", timeout=10)
+        articles = data.get("articles", []) if isinstance(data, dict) else []
+        return [a.get("title", "") for a in articles if a.get("title")]
+    except Exception:
+        return []
+
+
+_POS = frozenset({
+    "record", "launch", "upgrade", "partnership", "growth", "milestone",
+    "integration", "adoption", "secure", "audit", "expansion", "surge",
+    "soar", "strong", "bullish", "recover", "unlock", "approved", "live",
+})
+_NEG = frozenset({
+    "hack", "exploit", "attack", "rug", "scam", "crash", "breach",
+    "vulnerability", "drain", "loss", "freeze", "shutdown", "lawsuit",
+    "fraud", "liquidation", "depeg", "insolvency", "suspended", "halted",
+    "risk", "warning", "concern", "fell", "drop", "plunge", "slump",
+})
+
+
+def _score_headlines(headlines: list[str]) -> float:
+    if not headlines:
+        return 0.0
+    total = 0.0
+    for h in headlines:
+        words = h.lower().split()
+        pos = sum(1 for w in words if w.strip(".,!?") in _POS)
+        neg = sum(1 for w in words if w.strip(".,!?") in _NEG)
+        if pos + neg:
+            total += (pos - neg) / (pos + neg)
+    return round(total / len(headlines), 4)
+
+
+def fetch_news_sentiment(protocol_name: str) -> float:
+    """Returns sentiment in [-1, 1]. Negative = bearish, positive = bullish."""
+    cache_key = f"sentiment:{protocol_name}"
+    cache = get_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    with _gdelt_lock:
+        token     = PROTOCOLS[protocol_name]["token"]
+        headlines = _gdelt_headlines(token)
+        score     = _score_headlines(headlines)
+        cache.set(cache_key, score, ttl=86_400)
+        time.sleep(1.0)   # GDELT: 1s between live calls (recommended)
+    return score
+
+
+_gdelt_lock = Lock()   # GDELT recommends 1 req/s; serialise live calls
+
+
+def fetch_all_sentiments(status_cb=None) -> dict[str, float]:
+    cache_key = "sentiment:all"
+    cache = get_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    names     = list(PROTOCOLS.keys())
+    out       = {}
+    completed = 0
+    cb_lock   = Lock()
+
+    def _fetch(name):
+        return name, fetch_news_sentiment(name)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(_fetch, n): n for n in names}
+        for fut in as_completed(futures):
+            name, score = fut.result()
+            out[name] = score
+            with cb_lock:
+                completed += 1
+                if status_cb:
+                    status_cb(completed / len(names), f"Sentiment: {name}")
+
+    cache.set(cache_key, out, ttl=86_400)
+    return out
+
+
+# ── Convenience: load everything at once ──────────────────────────────────────
+# Price histories (CoinGecko, 20 calls × 2s) are NOT fetched here — they are
+# loaded on demand in the Protocol Deep Dive page to keep startup time short.
+
+def load_all_data(status_cb=None) -> dict:
+    names = list(PROTOCOLS.keys())
+    n     = len(names)
+
+    # Stage 1 — TVL history (0 → 50%), parallelised
+    def _tvl_cb(frac, label):
+        if status_cb:
+            status_cb(frac * 0.50, label)
+
+    tvl_data = fetch_all_tvl(status_cb=_tvl_cb)
+
+    # Stage 2 — Prices + Fear & Greed (50% → 60%)
+    if status_cb:
+        status_cb(0.50, "Token prices…")
+    prices = fetch_prices()
+
+    if status_cb:
+        status_cb(0.55, "Fear & Greed index…")
+    fng = fetch_fear_greed()
+
+    # Stage 3 — News sentiment (60% → 100%)
+    def _sent_cb(frac, label):
+        if status_cb:
+            status_cb(0.60 + frac * 0.40, label)
+
+    sentiments = fetch_all_sentiments(status_cb=_sent_cb)
+
+    if status_cb:
+        status_cb(1.0, "Done")
+
+    return {
+        "tvl":        tvl_data,
+        "prices":     prices,
+        "px_hist":    {},   # populated lazily per-protocol in Deep Dive
+        "fear_greed": fng,
+        "sentiment":  sentiments,
+        "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
+    }

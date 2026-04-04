@@ -1,0 +1,21 @@
+Rank,Protocol,Category,Main Chain
+1,Lido,Liquid Staking,Ethereum
+2,Sky (MakerDAO),CDP,Ethereum
+3,Aave,Lending,Multi-chain
+4,JustLend,Lending,TRON
+5,Uniswap,DEX,Multi-chain
+6,PancakeSwap,DEX,BNB Chain
+7,Convex Finance,Yield Aggregator,Ethereum
+8,Curve Finance,DEX,Multi-chain
+9,Compound,Lending,Ethereum
+10,Instadapp,Asset Management,Multi-chain
+11,Aerodrome,DEX,Base
+12,Kamino Finance,Yield Aggregator,Solana
+13,Beefy Finance,Yield Aggregator,Multi-chain
+14,Frax Finance,Stablecoin/LSD,Multi-chain
+15,GMX,Derivatives,Arbitrum/Avalanche
+16,Yearn Finance,Yield Aggregator,Ethereum
+17,Jupiter,DEX Aggregator,Solana
+18,Solend,Lending,Solana
+19,Synthetix,Derivatives,Optimism/Ethereum
+20,1Inch,DEX Aggregator,Multi-chain

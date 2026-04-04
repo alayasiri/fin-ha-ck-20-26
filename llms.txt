@@ -1,0 +1,105 @@
+# DefiLlama API
+
+> DefiLlama provides free, open-source DeFi analytics data. There are two separate APIs with different base URLs and authentication. Do NOT mix them.
+
+## Important: Free API vs Pro API
+
+The Free API and Pro API are entirely separate services.
+
+| Feature | Free API | Pro API |
+|---|---|---|
+| Base URL | https://api.llama.fi | https://pro-api.llama.fi/{KEY} |
+| Auth Required | No | Yes ($300/mo) |
+| Rate Limit | Standard | Higher |
+| Endpoints | 31 | 38 exclusive + 31 free with prefix |
+
+Pro API authentication: insert your API key between the base URL and endpoint path:
+```
+https://pro-api.llama.fi/{YOUR_API_KEY}/api/protocols
+```
+
+Do NOT use `pro-api.llama.fi` without an API key. Do NOT put API keys in `api.llama.fi` URLs.
+
+**Pro users accessing free endpoints:** Pro API key holders can also call free endpoints on `pro-api.llama.fi` for higher rate limits. Use the exact path mappings below.
+
+## Free-to-Pro Path Mapping
+
+Pro users: to call free endpoints with higher rate limits, use `https://pro-api.llama.fi/{YOUR_API_KEY}` with the pro path below.
+
+| Free path (api.llama.fi) | Pro path (pro-api.llama.fi) | Description |
+|---|---|---|
+| `/protocols` | `/api/protocols` | List all protocols on defillama along with their tvl |
+| `/protocol/{protocol}` | `/api/protocol/{protocol}` | Get historical TVL of a protocol and breakdowns by token and chain |
+| `/v2/historicalChainTvl` | `/api/v2/historicalChainTvl` | Get historical TVL (excludes liquid staking and double counted tvl) of DeFi on all chains |
+| `/v2/historicalChainTvl/{chain}` | `/api/v2/historicalChainTvl/{chain}` | Get historical TVL (excludes liquid staking and double counted tvl) of a chain |
+| `/tvl/{protocol}` | `/api/tvl/{protocol}` | Simplified endpoint to get current TVL of a protocol |
+| `/v2/chains` | `/api/v2/chains` | Get current TVL of all chains |
+| `/prices/current/{coins}` | `/coins/prices/current/{coins}` | Get current prices of tokens by contract address |
+| `/prices/historical/{timestamp}/{coins}` | `/coins/prices/historical/{timestamp}/{coins}` | Get historical prices of tokens by contract address |
+| `/batchHistorical` | `/coins/batchHistorical` | Get historical prices for multiple tokens at multiple different timestamps |
+| `/chart/{coins}` | `/coins/chart/{coins}` | Get token prices at regular time intervals |
+| `/percentage/{coins}` | `/coins/percentage/{coins}` | Get percentage change in price over time |
+| `/prices/first/{coins}` | `/coins/prices/first/{coins}` | Get earliest timestamp price record for coins |
+| `/block/{chain}/{timestamp}` | `/coins/block/{chain}/{timestamp}` | Get the closest block to a timestamp |
+| `/stablecoins` | `/stablecoins/stablecoins` | List all stablecoins along with their circulating amounts |
+| `/stablecoincharts/all` | `/stablecoins/stablecoincharts/all` | Get historical mcap sum of all stablecoins |
+| `/stablecoincharts/{chain}` | `/stablecoins/stablecoincharts/{chain}` | Get historical mcap sum of all stablecoins in a chain |
+| `/stablecoin/{asset}` | `/stablecoins/stablecoin/{asset}` | Get historical mcap and historical chain distribution of a stablecoin |
+| `/stablecoinchains` | `/stablecoins/stablecoinchains` | Get current mcap sum of all stablecoins on each chain |
+| `/stablecoinprices` | `/stablecoins/stablecoinprices` | Get historical prices of all stablecoins |
+| `/pools` | `/yields/pools` | Retrieve the latest data for all pools, including enriched information such as predictions |
+| `/chart/{pool}` | `/yields/chart/{pool}` | Get historical APY and TVL of a pool |
+| `/overview/dexs` | `/api/overview/dexs` | List all dexs along with summaries of their volumes and dataType history data |
+| `/overview/dexs/{chain}` | `/api/overview/dexs/{chain}` | List all dexs along with summaries of their volumes and dataType history data filtering by chain |
+| `/summary/dexs/{protocol}` | `/api/summary/dexs/{protocol}` | Get summary of dex volume with historical data |
+| `/overview/options` | `/api/overview/options` | List all options dexs along with summaries of their volumes and dataType history data |
+| `/overview/options/{chain}` | `/api/overview/options/{chain}` | List all options dexs along with summaries of their volumes and dataType history data filtering by chain |
+| `/summary/options/{protocol}` | `/api/summary/options/{protocol}` | Get summary of options dex volume with historical data |
+| `/overview/open-interest` | `/api/overview/open-interest` | List all open interest dex exchanges along with summaries of their open interest |
+| `/overview/fees` | `/api/overview/fees` | List all protocols along with summaries of their fees and revenue and dataType history data |
+| `/overview/fees/{chain}` | `/api/overview/fees/{chain}` | List all protocols along with summaries of their fees and revenue and dataType history data by chain |
+| `/summary/fees/{protocol}` | `/api/summary/fees/{protocol}` | Get summary of protocol fees and revenue with historical data |
+
+## SDKs
+
+**JavaScript** — `npm install @defillama/api` — [GitHub](https://github.com/DefiLlama/api-sdk)
+**Python** — `pip install defillama-sdk` — [GitHub](https://github.com/DefiLlama/python-sdk)
+
+## Free API Endpoints (api.llama.fi)
+
+Full documentation: [llms-free.txt](/llms-free.txt)
+
+No authentication required. Base URL: `https://api.llama.fi`
+
+- **TVL**: `/protocols`, `/protocol/{protocol}`, `/v2/historicalChainTvl`, `/v2/historicalChainTvl/{chain}`, `/tvl/{protocol}`, `/v2/chains`
+- **Coins & Prices**: `/prices/current/{coins}`, `/prices/historical/{timestamp}/{coins}`, `/batchHistorical`, `/chart/{coins}`, `/percentage/{coins}`, `/prices/first/{coins}`, `/block/{chain}/{timestamp}`
+- **Stablecoins**: `/stablecoins`, `/stablecoincharts/all`, `/stablecoincharts/{chain}`, `/stablecoin/{asset}`, `/stablecoinchains`, `/stablecoinprices`
+- **Yields & APY**: `/pools`, `/chart/{pool}`
+- **DEX Volumes**: `/overview/dexs`, `/overview/dexs/{chain}`, `/summary/dexs/{protocol}`, `/overview/options`, `/overview/options/{chain}`, `/summary/options/{protocol}`
+- **Perpetuals & Open Interest**: `/overview/open-interest`
+- **Fees & Revenue**: `/overview/fees`, `/overview/fees/{chain}`, `/summary/fees/{protocol}`
+
+## Pro-Only API Endpoints (pro-api.llama.fi)
+
+Full documentation: [llms-pro.txt](/llms-pro.txt)
+
+Requires API key. Base URL: `https://pro-api.llama.fi`
+
+- **TVL**: `/api/tokenProtocols/{symbol}`, `/api/inflows/{protocol}/{timestamp}`, `/api/chainAssets`
+- **Stablecoins**: `/stablecoins/stablecoindominance/{chain}`
+- **Token Unlocks**: `/api/emissions`, `/api/emission/{protocol}`
+- **Protocol Analytics**: `/api/categories`, `/api/forks`, `/api/oracles`, `/api/hacks`, `/api/raises`, `/api/treasuries`, `/api/entities`
+- **Token Liquidity**: `/api/historicalLiquidity/{token}`
+- **Yields & APY**: `/yields/poolsOld`, `/yields/poolsBorrow`, `/yields/chartLendBorrow/{pool}`, `/yields/perps`, `/yields/lsdRates`
+- **ETFs**: `/etfs/snapshot`, `/etfs/flows`
+- **Narratives**: `/fdv/performance/{period}`
+- **Perpetuals & Open Interest**: `/api/overview/derivatives`, `/api/summary/derivatives/{protocol}`
+- **Bridges**: `/bridges/bridges`, `/bridges/bridge/{id}`, `/bridges/bridgevolume/{chain}`, `/bridges/bridgedaystats/{timestamp}/{chain}`, `/bridges/transactions/{id}`
+- **API Key Management**: `/usage/APIKEY`
+- **Digital Asset Treasury**: `/dat/institutions`, `/dat/institutions/{symbol}`
+- **Equities**: `/equities/v1/companies`, `/equities/v1/statements`, `/equities/v1/price-history`, `/equities/v1/ohlcv`, `/equities/v1/summary`, `/equities/v1/filings`
+
+## Optional
+
+- [OpenAPI spec (free)](/defillama-openapi-free.json): Full OpenAPI 3.0 specification for free endpoints
+- [OpenAPI spec (pro)](/defillama-openapi-pro.json): Full OpenAPI 3.0 specification for pro endpoints
